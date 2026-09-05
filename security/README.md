@@ -24,7 +24,7 @@ and the kube-bench Jobs).
 | `04-network-policy` | Reach `postgres:5432` from another namespace, then apply a deny policy and retry | FAIL: Flannel does not enforce NetworkPolicy, so the policy is silently ignored |
 | `05-secrets-audit` | Secrets at rest: reads the raw etcd key, checks for `--encryption-provider-config`, credentials in git and in the Deployment, kubeconfig perms | FAIL: password readable verbatim from etcd; FAIL: literal connection string |
 | `06-image-scan` | Trivy CVE scan of `devapp/api:dev` and `postgres:16-alpine`, plus misconfig scan of `app/` (Dockerfile) and `k8s/` | Varies with the day's CVE feed |
-| `07-pod-security-admission` | Namespace PSA labels; proves `enforce=restricted` blocks a privileged pod; dry-runs the lab workloads against `restricted` to list what they violate | WARN: no labels; WARN: api and postgres violate restricted (capabilities, seccomp) |
+| `07-pod-security-admission` | Namespace PSA labels; proves `enforce=restricted` blocks a privileged pod; dry-runs the lab workloads against `restricted` to list what they violate | WARN: no labels; WARN: api and postgres violate restricted (capabilities, seccomp); PASS: web, the hardened reference manifest |
 | `08-kube-bench` | CIS Kubernetes Benchmark on the control plane and a worker | A few FAILs typical for kubeadm defaults (audit logging, file permissions) |
 | `09-exposure` | From the host: open ports per node, kubelet anonymous access, API server anonymous access, Swagger UI exposure | WARN: etcd and controller ports reachable on the LAN; WARN: `/docs` public |
 

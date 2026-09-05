@@ -61,6 +61,10 @@ Layers, bottom to top:
   in section 2.7.
 - The host-only interface is named `enp0s8` on `ubuntu/jammy64` and `eth1` on the bento
   arm64 box. The scripts never hard-code it; they look up which interface owns `NODE_IP`.
+- `role` decides what a VM becomes. `control-plane` and `worker` are kubeadm nodes; `web` is a
+  plain nginx box outside the cluster that proxies to the API's NodePort, the way a load balancer
+  or bastion sits in front of a real cluster. It exists so you can practise the edge: TLS, headers,
+  failover when a worker dies, and what an attacker on the LAN sees first.
 - One node (`DESKTOP_NODE`, default `cp1`) is sized up to 4 GB / 4 CPUs and gets a desktop.
   Three environment variables (`K8S_DESKTOP`, `K8S_CONSOLE_KERNEL`, `K8S_BOX`) tune this
   without editing the file; see the README.
@@ -128,8 +132,9 @@ exactly the reason production clusters use networked or cloud block storage.
 
 ### 2.5 Image distribution (`scripts/load-image.sh`)
 
-There is no registry. The image is built on the host, saved to a tarball in the synced
-folder, and imported straight into containerd's `k8s.io` namespace on each worker.
+There is no registry. Each image (`devapp/api:dev` from `app/`, `devapp/web:dev` from `web/`)
+is built on the host, saved to a tarball in the synced folder, and imported straight into
+containerd's `k8s.io` namespace on each worker.
 
 Two details that trip people up:
 - The `k8s.io` namespace matters. `ctr images ls` with no `-n` shows a different namespace,
@@ -158,6 +163,11 @@ Manifest walk-through:
   and limits, both probes, a non-root `securityContext`, and a **NodePort Service** on 30080.
   NodePort opens the port on *every* node, which is why `make test` can hit w1 even though
   a pod may be on w2.
+- `30-web.yaml`: the static site as an nginx **Deployment** on NodePort 30081, proxying `/api/`
+  to the `api` Service by its DNS name. Read it next to `20-api.yaml`: it is what the API
+  manifest would look like fully hardened (read-only root filesystem with `emptyDir` scratch
+  space, `capabilities.drop: [ALL]`, `seccompProfile`, `automountServiceAccountToken: false`).
+  `make sectest ROUTINE=07` shows one passing `restricted` and the other not.
 
 ### 2.7 Console and desktop (`scripts/console-kernel.sh`, `scripts/desktop.sh`)
 
@@ -273,6 +283,13 @@ troubleshooting table in `CLAUDE.md`.
 13. **Power off from the window, on purpose.** Close w2's console window with "Power off".
     Watch `kubectl get nodes` mark it NotReady after about 40 s, see which pods were on it,
     then `vagrant up w2` and watch them come back.
+
+14. **Failover at the edge.** `watch curl -s http://192.168.56.20/api/healthz` (the pod name
+    alternates), then `vagrant halt w2`. Requests keep succeeding via w1; nginx marks the dead
+    upstream after two failures. `vagrant up w2` and watch it return to rotation.
+15. **Inspect the edge.** `curl -skI https://192.168.56.20/` and read the headers nginx adds.
+    Then `openssl s_client -connect 192.168.56.20:443 </dev/null | head` to see why your browser
+    warns: the cert is self-signed. Replace it with one from a local CA you create with openssl.
 
 ---
 

@@ -20,7 +20,10 @@ NODES = [
   { name: "cp1", ip: "#{NET_PREFIX}.10", cpus: 2, mem: 2048, role: "control-plane" },
   { name: "w1",  ip: "#{NET_PREFIX}.11", cpus: 2, mem: 2048, role: "worker" },
   { name: "w2",  ip: "#{NET_PREFIX}.12", cpus: 2, mem: 2048, role: "worker" },
+  # "web": standalone edge box, NOT in the cluster. nginx proxies /api/ to the workers' NodePort.
+  { name: "web", ip: "#{NET_PREFIX}.20", cpus: 1, mem: 1024, role: "web" },
 ]
+WORKER_IPS = NODES.select { |n| n[:role] == "worker" }.map { |n| n[:ip] }.join(" ")
 
 Vagrant.configure("2") do |config|
   config.vm.box = BOX
@@ -52,14 +55,23 @@ Vagrant.configure("2") do |config|
       if CONSOLE_KERNEL
         vm.vm.provision "console-kernel", type: "shell", path: "scripts/console-kernel.sh", reboot: true
       end
-      vm.vm.provision "common", type: "shell", path: "scripts/common.sh",
-        env: { "K8S_VERSION" => K8S_VERSION, "NODE_IP" => node[:ip] }
+      vm.vm.provision "banner", type: "shell", path: "scripts/console-banner.sh"
 
-      if node[:role] == "control-plane"
-        vm.vm.provision "control-plane", type: "shell", path: "scripts/control-plane.sh",
-          env: { "NODE_IP" => node[:ip], "POD_CIDR" => POD_CIDR }
+      case node[:role]
+      when "control-plane", "worker"
+        vm.vm.provision "common", type: "shell", path: "scripts/common.sh",
+          env: { "K8S_VERSION" => K8S_VERSION, "NODE_IP" => node[:ip] }
+        if node[:role] == "control-plane"
+          vm.vm.provision "control-plane", type: "shell", path: "scripts/control-plane.sh",
+            env: { "NODE_IP" => node[:ip], "POD_CIDR" => POD_CIDR }
+        else
+          vm.vm.provision "worker", type: "shell", path: "scripts/worker.sh"
+        end
+      when "web"
+        vm.vm.provision "web", type: "shell", path: "scripts/web.sh",
+          env: { "WORKERS" => WORKER_IPS, "NODE_PORT" => "30080", "SITE_PORT" => "30081" }
       else
-        vm.vm.provision "worker", type: "shell", path: "scripts/worker.sh"
+        raise "unknown role #{node[:role]} for node #{node[:name]}"
       end
 
       # Last, so the cluster is up before the (slow) desktop install starts

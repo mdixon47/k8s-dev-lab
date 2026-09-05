@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>k8s-dev-lab</title>
+<style>
+  body { font: 16px/1.55 system-ui, sans-serif; margin: 3rem auto; max-width: 42rem; padding: 0 1rem; color: #222; }
+  code { background: #eef; padding: .1em .35em; border-radius: 3px; }
+  pre { background: #f4f4f4; padding: .75rem 1rem; overflow-x: auto; }
+  li { margin: .3rem 0; }
+  #out { min-height: 1.5em; color: #060; }
+</style>
+<h1>k8s-dev-lab</h1>
+<p>This page is served by the <code>web</code> Deployment in the <code>devapp</code> namespace:
+an nginx container built from <code>web/</code>, imported into containerd on each worker, and
+exposed on NodePort <code>30081</code>. It proxies <code>/api/</code> to the FastAPI service.</p>
+<ul>
+  <li><a href="/api/healthz">/api/healthz</a> — API liveness; shows which pod answered</li>
+  <li><a href="/api/readyz">/api/readyz</a> — API readiness (checks Postgres)</li>
+  <li><a href="/api/notes">/api/notes</a> — notes stored in Postgres</li>
+  <li><a href="/docs">/docs</a> — Swagger UI</li>
+  <li><a href="/healthz">/healthz</a> — this nginx</li>
+</ul>
+<h2>Try it</h2>
+<p><button id="ping">GET /api/healthz</button> <button id="add">POST a note</button> <span id="out"></span></p>
+<pre>curl -s -X POST http://192.168.56.11:30081/api/notes \
+  -H 'Content-Type: application/json' -d '{"text":"from the site"}'</pre>
+<h2>Paths a request can take</h2>
+<pre>browser → web VM (192.168.56.20, nginx edge) → NodePort 30081 → web pod → api Service → api pod → postgres
+browser → NodePort 30081 on any worker      → web pod → api Service → api pod → postgres
+browser → NodePort 30080 on any worker      → api pod → postgres</pre>
+<script>
+  const out = document.getElementById('out');
+  document.getElementById('ping').onclick = async () => {
+    out.textContent = await (await fetch('/api/healthz')).text();
+  };
+  document.getElementById('add').onclick = async () => {
+    const r = await fetch('/api/notes', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: 'from the site at ' + new Date().toISOString() }) });
+    out.textContent = await r.text();
+  };
+</script>
+</html>

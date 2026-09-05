@@ -2,13 +2,14 @@
 
 A reproducible local development environment: three Ubuntu 22.04 VMs on VirtualBox
 form a real kubeadm cluster (1 control plane, 2 workers), and a FastAPI + Postgres
-sample app runs on it. One node also gets a lightweight desktop so you can work
+sample app runs on it behind an nginx site, with a fourth VM acting as the edge. One node also gets a lightweight desktop so you can work
 inside the cluster from a VM window.
 
 ```
 Host ──vagrant──▶ cp1  192.168.56.10  (control plane, Flannel CNI, XFCE desktop)
                   w1   192.168.56.11  (worker)
                   w2   192.168.56.12  (worker)
+                  web  192.168.56.20  (edge: nginx reverse proxy, not in the cluster)
 ```
 
 ## Prerequisites (host)
@@ -16,15 +17,15 @@ Host ──vagrant──▶ cp1  192.168.56.10  (control plane, Flannel CNI, XFC
 - Vagrant 2.4+
 - Docker (to build the API image)
 - kubectl, make, curl
-- ~8 GB free RAM (~6 GB without the desktop), ~25 GB disk
+- ~9 GB free RAM (~7 GB without the desktop), ~30 GB disk
 
 ## Quick start
 ```bash
 make up        # provision VMs + cluster (first run pulls packages; 15–20 min)
 make storage   # default StorageClass for the Postgres PVC
-make image     # build devapp/api:dev and import into each worker's containerd
+make image     # build devapp/api:dev and devapp/web:dev, import into each worker's containerd
 make deploy    # apply k8s/ manifests
-make test      # curl the API via NodePort 30080
+make test      # curl the API (30080), the site (30081), and the web edge
 ```
 
 `kubectl` works from the host once the cluster is up:
@@ -57,10 +58,37 @@ app is at `http://192.168.56.11:30080/docs`.
 | `K8S_CONSOLE_KERNEL` | `1` on arm64, `0` otherwise | Install Ubuntu's HWE kernel so the VM console window shows output (one reboot per node during `make up`). Required for the desktop on arm64. |
 | `K8S_BOX` | by host arch | Override the Vagrant box. |
 
+## The web edge
+`web` is a plain VM outside Kubernetes running nginx, the way a load balancer or bastion
+sits in front of a real cluster. It proxies `/` to the site NodePort (30081) and `/api/...`
+to the API NodePort (30080) on every worker with failover, and serves HTTPS with a self-signed cert.
+
+```bash
+vagrant up web                                # only needed once; make up creates it too
+open http://192.168.56.20/                    # landing page with links
+curl -s http://192.168.56.20/api/healthz      # -> {"status":"ok","pod":...}
+curl -sk https://192.168.56.20/api/notes
+```
+Roles are set in `NODES`: `control-plane` and `worker` get kubeadm; `web` gets only nginx.
+Take it down with `vagrant halt web`; it has no effect on the cluster.
+
+## The site (in-cluster nginx)
+`web/` is a static site plus an nginx proxy to the API, built into `devapp/web:dev` and loaded
+onto the workers exactly like the API image. `k8s/30-web.yaml` runs it as a 2-replica
+Deployment on NodePort **30081**. It is the hardened counterpart of the API manifest: read-only
+root filesystem, all capabilities dropped, seccomp, no service-account token, so it passes the
+`restricted` Pod Security profile (`make sectest ROUTINE=07`).
+
+```
+http://192.168.56.11:30081/          site (any worker IP)
+http://192.168.56.11:30081/api/notes proxied to the api Service inside the cluster
+http://192.168.56.20/                same site through the edge VM
+```
+
 ## Dev loop
-1. Edit `app/main.py`
-2. `make image` (rebuild + reload onto workers)
-3. `kubectl -n devapp rollout restart deployment/api`
+1. Edit `app/main.py` (API) or `web/site/` (site)
+2. `make image` (both images) or `make image IMAGES=web`
+3. `kubectl -n devapp rollout restart deployment/api` (or `deployment/web`)
 
 The Postgres `notes` table persists across API restarts via the PVC.
 `make clean` tears everything down.
@@ -82,10 +110,13 @@ scripts/common.sh          containerd, kubeadm, kubelet on every node
 scripts/console-kernel.sh  arm64: HWE kernel + rebuilt Guest Additions so the console works
 scripts/control-plane.sh   kubeadm init, Flannel, writes kubeconfig + join.sh (idempotent)
 scripts/worker.sh          waits for join.sh, joins the cluster (idempotent)
+scripts/web.sh             web role: nginx edge proxy to the API NodePorts (+ self-signed TLS)
+scripts/console-banner.sh  every VM: login banner with credentials, quiet tty
 scripts/desktop.sh         XFCE + Firefox + auto-login on the desktop node
-scripts/load-image.sh      build image on host → import into workers (no registry)
+scripts/load-image.sh      build api + web images on host → import into workers (no registry)
 app/                       FastAPI service + Dockerfile
-k8s/                       Namespace, Postgres StatefulSet, API Deployment + NodePort
+web/                       static site + nginx proxy config + Dockerfile
+k8s/                       Namespace, Postgres StatefulSet, API Deployment + NodePort, web Deployment + NodePort
 docs/learn.md              Learning guide: concepts, walkthrough, exercises
 security/                  Security test routines (make sectest); see security/README.md
 ```

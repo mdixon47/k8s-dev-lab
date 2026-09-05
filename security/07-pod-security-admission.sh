@@ -19,7 +19,7 @@ else
 fi
 
 section "Would the lab workloads pass 'restricted'?"
-for kind_name in deployment/api statefulset/postgres; do
+for kind_name in deployment/api statefulset/postgres deployment/web; do
   spec="$(kubectl -n "$NS" get "$kind_name" -o json | jq '{apiVersion:"v1",kind:"Pod",metadata:{name:(.metadata.name+"-psa-check")},spec:.spec.template.spec}')"
   msg="$(kubectl -n "$T" apply --dry-run=server -f - <<<"$spec" 2>&1 >/dev/null)"
   if [ -z "$msg" ]; then pass "$kind_name would pass restricted"

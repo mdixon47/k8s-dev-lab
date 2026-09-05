@@ -1,7 +1,7 @@
 .vagrant/
 kubeconfig
 join.sh
-api-image.tar
+*-image.tar
 *.log
 __pycache__/
 *.pyc

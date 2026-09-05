@@ -16,16 +16,6 @@ net.ipv4.ip_forward                 = 1
 S
 sysctl --system >/dev/null
 
-# Text console: keep kernel/cloud-init chatter off the login prompt and print the lab
-# credentials in the banner (dev-only box; the vagrant user is passwordless sudo anyway).
-echo "kernel.printk = 3 4 1 3" >/etc/sysctl.d/k8s-console.conf
-sysctl -q -p /etc/sysctl.d/k8s-console.conf
-cat >/etc/issue <<'I'
-\n (\l)  k8s-dev-lab node
-Login: vagrant   Password: vagrant   (sudo needs no password)
-Press Enter if this prompt is buried under boot messages.
-
-I
 # fstab is tab-separated; match any whitespace, and don't double-comment on re-runs
 swapoff -a && sed -i -E '/[[:space:]]swap[[:space:]]/ s/^([^#])/#\1/' /etc/fstab
 

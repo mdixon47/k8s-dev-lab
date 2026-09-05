@@ -12,6 +12,7 @@ three Ubuntu 22.04 VMs on VirtualBox, kubeadm forms them into a real cluster
 cp1  192.168.56.10  control plane
 w1   192.168.56.11  worker
 w2   192.168.56.12  worker
+web  192.168.56.20  edge (nginx reverse proxy; NOT a cluster member)
 ```
 
 Host requirements: VirtualBox 7.x (7.1+ on Apple Silicon), Vagrant 2.4+, Docker, kubectl, make, curl, ~8 GB free RAM (~6 GB with `K8S_DESKTOP=""`).
@@ -26,28 +27,32 @@ Host requirements: VirtualBox 7.x (7.1+ on Apple Silicon), Vagrant 2.4+, Docker,
 | `scripts/common.sh` | Runs on every node: kernel modules, sysctl, swap off, containerd (SystemdCgroup), kubeadm/kubelet/kubectl from pkgs.k8s.io, pins kubelet `--node-ip`. |
 | `scripts/control-plane.sh` | `kubeadm init`, writes kubeconfig to `/vagrant/kubeconfig`, installs Flannel pinned to the interface that owns `NODE_IP` (`enp0s8` on `ubuntu/jammy64`, `eth1` on `bento/ubuntu-22.04`), writes `/vagrant/join.sh`. |
 | `scripts/worker.sh` | Waits for `join.sh` then joins the cluster. |
-| `scripts/load-image.sh` | Builds `devapp/api:dev` with Docker on the host and imports it into containerd on each worker via `ctr -n k8s.io images import`. No registry. |
+| `scripts/web.sh` | `web` role only: nginx on 80/443 (self-signed cert) proxying `/` to the site NodePort 30081 and `/api/` to the API NodePort 30080 on `WORKERS` with failover. No kubeadm/containerd on this node. |
+| `scripts/console-banner.sh` | Every VM: `/etc/issue` login banner with credentials and `kernel.printk` lowered so the tty prompt stays readable. |
+| `scripts/load-image.sh` | Builds `devapp/api:dev` (from `app/`) and `devapp/web:dev` (from `web/`) with Docker on the host and imports them into containerd on each worker via `ctr -n k8s.io images import`. No registry. Args select images (`make image IMAGES=web`); bash-3.2 compatible (macOS). |
 | `app/main.py` | FastAPI service (psycopg 3). Endpoints: `/healthz`, `/readyz`, `GET/POST /notes`. Creates the `notes` table on startup. |
+| `web/` | Static site (`site/`), `nginx.conf` proxying `/api/` to the `api` Service and `/docs`,`/openapi.json` through, `Dockerfile` on `nginxinc/nginx-unprivileged` (uid 101, port 8080). Built as `devapp/web:dev`. |
 | `app/Dockerfile` | python:3.12-slim, non-root `appuser` (UID 1000), uvicorn on 8000. |
 | `k8s/00-namespace.yaml` | `devapp` namespace. |
 | `k8s/10-postgres.yaml` | Secret, PVC, StatefulSet (postgres:16-alpine), ClusterIP Service. |
 | `k8s/20-api.yaml` | Deployment (2 replicas, probes, limits, non-root securityContext), NodePort Service on 30080. |
+| `k8s/30-web.yaml` | web Deployment (2 replicas, `restricted`-compliant: read-only root fs, drop ALL, seccomp, no SA token, emptyDirs for `/tmp` and `/var/cache/nginx`), NodePort Service on 30081. |
 | `Makefile` | Workflow targets (below). |
 | `security/` | Security test routines, `make sectest` (`ROUTINE=NN` for one, `SKIP_SLOW=1` to skip Trivy/kube-bench). `lib.sh` has the PASS/FAIL helpers; `policies/` holds the NetworkPolicy and privileged-pod fixtures. Routines create and remove `sec-probe`/`sec-psa` namespaces and kube-bench Jobs. |
 | `docs/learn.md` | Learning guide: layer-by-layer explanation of the lab, guided walkthrough, exercises. |
 
-Generated, git-ignored files: `kubeconfig`, `join.sh`, `api-image.tar`, `.vagrant/`.
+Generated, git-ignored files: `kubeconfig`, `join.sh`, `*-image.tar`, `.vagrant/`.
 
 ## Common commands
 
 ```bash
 make up        # vagrant up — provisions cluster (10–15 min first run)
 make storage   # install local-path-provisioner and set it as default StorageClass
-make image     # build API image and load onto workers
+make image     # build api + web images and load onto workers (IMAGES=web for one)
 make deploy    # kubectl apply -f k8s/ and wait for rollouts
 make status    # nodes, pods, svc, pvc
 make logs      # tail API logs
-make test      # curl /healthz, POST a note, GET notes via 192.168.56.11:30080
+make test      # API via 30080, site via 30081, and via the web edge 192.168.56.20
 make sectest   # security routines in security/ (ROUTINE=NN, SKIP_SLOW=1)
 make down      # vagrant halt
 make clean     # vagrant destroy + remove generated files
@@ -60,11 +65,11 @@ Run order for a fresh clone: `up → storage → image → deploy → test`.
 
 ## Development loop
 
-1. Edit `app/main.py`.
-2. `make image` — rebuilds and re-imports the image on both workers.
-3. `kubectl -n devapp rollout restart deployment/api`.
+1. Edit `app/main.py` (API) or `web/site/`, `web/nginx.conf` (site).
+2. `make image` (or `IMAGES=api` / `IMAGES=web`) — rebuilds and re-imports on both workers.
+3. `kubectl -n devapp rollout restart deployment/api` (or `deployment/web`).
 
-Because `imagePullPolicy: IfNotPresent` and the tag is fixed (`devapp/api:dev`), a rollout
+Because `imagePullPolicy: IfNotPresent` and the tags are fixed (`devapp/api:dev`, `devapp/web:dev`), a rollout
 restart is required after every image reload; pods won't pick up the new image otherwise.
 
 Local run without the cluster: `cd app && pip install -r requirements.txt && uvicorn main:app --reload`
@@ -75,8 +80,9 @@ Local run without the cluster: `cd app && pip install -r requirements.txt && uvi
 - **Networking is VirtualBox-specific.** Every VM's NAT NIC shares 10.0.2.15, so kubelet is
   pinned with `--node-ip` and Flannel with `--iface=<interface owning NODE_IP>` (resolved at
   provision time, falls back to `enp0s8`). Do not remove these when editing the scripts.
-- **Adding a node:** append to `NODES` in the Vagrantfile, then `vagrant up <name>`.
-  Update `load-image.sh`'s worker list and `make test`'s IP if relevant.
+- **Adding a node:** append to `NODES` in the Vagrantfile, then `vagrant up <name>`. `role` selects the
+  provisioners: `control-plane`/`worker` run `common.sh` + kubeadm; `web` runs only `web.sh`; anything
+  else raises. `WORKER_IPS` is derived from `NODES`. Update `load-image.sh`'s worker list and `make test`'s IP if relevant.
 - **Kubernetes version:** change `K8S_VERSION` in the Vagrantfile only; scripts read it from env.
   Keep the pkgs.k8s.io minor-version repo in sync (it is derived automatically).
 - **Images:** no registry is used. Any new image must be loaded with the same
