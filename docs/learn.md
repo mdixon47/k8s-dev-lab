@@ -260,7 +260,8 @@ troubleshooting table in `CLAUDE.md`.
    and delete the `--iface=...` arg. Wait for the Flannel pods to roll, then check the
    `public-ip` annotation on each node (see 2.3) and run
    `kubectl -n devapp run dns --rm -it --image=busybox:1.36 -- nslookup postgres.devapp`.
-   Nodes stay Ready while DNS times out. Restore with `vagrant provision cp1`.
+   Nodes stay Ready while DNS times out. Restore with
+   `vagrant provision cp1 --provision-with control-plane` (re-applies Flannel without rebooting).
 10. **Re-provision without fear.** Run `vagrant provision` and read the output: which steps
     say "already ...; skipping", which re-run anyway (apt, Flannel apply, join token), and
     why is that safe? On arm64, watch the nodes reboot and the cluster recover on its own.
@@ -302,3 +303,7 @@ You have understood the lab when you can answer these without looking:
 - Move the plaintext Secret to Sealed Secrets or External Secrets.
 - Install an Ingress controller (ingress-nginx via NodePort) and expose the API on a hostname.
 - Add a second control-plane node and a load balancer to see why HA needs a stable endpoint.
+- Run `make sectest` and work through [security/README.md](../security/README.md): nine routines
+  that audit pod specs, probe from inside a container, check RBAC, prove Flannel ignores
+  NetworkPolicy, read a Secret straight out of etcd, scan images, test Pod Security Admission,
+  run the CIS benchmark, and map what the nodes expose on the LAN. Each finding is a hardening exercise.

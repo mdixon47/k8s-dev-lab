@@ -1,7 +1,7 @@
 KUBECONFIG ?= $(CURDIR)/kubeconfig
 KUBECTL     = KUBECONFIG="$(KUBECONFIG)" kubectl
 
-.PHONY: up down storage image deploy status logs test clean
+.PHONY: up down storage image deploy status logs test sectest clean
 
 up:            ## Create the 3-node cluster (10-15 min first run)
 	vagrant up
@@ -32,6 +32,9 @@ test:          ## Hit the API through a worker's NodePort
 	curl -s http://192.168.56.11:30080/healthz; echo
 	curl -s -X POST http://192.168.56.11:30080/notes -H 'Content-Type: application/json' -d '{"text":"hello from k8s"}'; echo
 	curl -s http://192.168.56.11:30080/notes; echo
+
+sectest:       ## Security test routines (make sectest ROUTINE=04 for one; SKIP_SLOW=1 skips Trivy/kube-bench)
+	KUBECONFIG="$(KUBECONFIG)" ./security/run-all.sh $(ROUTINE)
 
 clean:         ## Destroy everything
 	vagrant destroy -f

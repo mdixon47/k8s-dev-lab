@@ -45,7 +45,10 @@ app is at `http://192.168.56.11:30080/docs`.
 - Close the window with **Continue running in background**. **Power off** halts the node;
   recover with `vagrant up cp1`.
 - The screen is fixed at 1280x800 (VirtualBox's ARM64 display cannot resize).
-- `w1` and `w2` have a text console only. `vagrant ssh <node>` is the everyday way in.
+- The desktop never locks; there is no screensaver password to remember.
+- `w1` and `w2` have a text console only: log in as `vagrant` / `vagrant` (the banner
+  says so; press Enter if boot messages have scrolled over the prompt, and note the
+  password does not echo as you type). `vagrant ssh <node>` is the everyday way in.
 - Tunables (environment variables read by the Vagrantfile):
 
 | Variable | Default | Effect |
@@ -84,7 +87,19 @@ scripts/load-image.sh      build image on host → import into workers (no regis
 app/                       FastAPI service + Dockerfile
 k8s/                       Namespace, Postgres StatefulSet, API Deployment + NodePort
 docs/learn.md              Learning guide: concepts, walkthrough, exercises
+security/                  Security test routines (make sectest); see security/README.md
 ```
+
+## Security testing
+```bash
+make sectest                 # all routines: pod specs, runtime probe, RBAC, NetworkPolicy,
+                             # secrets in etcd, Trivy, Pod Security Admission, kube-bench, exposure
+make sectest ROUTINE=05      # just one
+SKIP_SLOW=1 make sectest     # without Trivy and kube-bench
+```
+The stock lab fails several checks on purpose (plaintext `DATABASE_URL`, no NetworkPolicy
+enforcement under Flannel, unencrypted etcd). [security/README.md](security/README.md) explains
+each finding and how to fix it. Only ever point these at your own cluster.
 
 ## Notes & gotchas
 - kubelet is pinned to `--node-ip` on the host-only NIC; VirtualBox's NAT interface gives
@@ -96,6 +111,7 @@ docs/learn.md              Learning guide: concepts, walkthrough, exercises
 - Credentials in `k8s/10-postgres.yaml` are dev-only. For anything shared, move them
   to a sealed secret or external secrets store.
 - To add a worker, append to `NODES` in the Vagrantfile and run `vagrant up <name>`.
-- On arm64, `vagrant provision` reboots each node (console-kernel step). Expect a short
-  cluster blip; the control-plane script waits for the API server before continuing.
+- On arm64, a full `vagrant provision` reboots each node (console-kernel step). Provisioners are
+  named, so re-run one step without the reboot: `vagrant provision cp1 --provision-with control-plane`
+  (others: `hosts`, `console-kernel`, `common`, `worker`, `desktop`).
 - Troubleshooting table: see [CLAUDE.md](CLAUDE.md).

@@ -47,19 +47,19 @@ Vagrant.configure("2") do |config|
         vb.customize ["setextradata", :id, "GUI/AutoresizeGuest", "off"] if desktop
       end
 
-      vm.vm.provision "shell",
+      vm.vm.provision "hosts", type: "shell",
         inline: "grep -q ' #{node[:name]}$' /etc/hosts || echo -e '#{hosts}' >> /etc/hosts"
       if CONSOLE_KERNEL
-        vm.vm.provision "shell", path: "scripts/console-kernel.sh", reboot: true
+        vm.vm.provision "console-kernel", type: "shell", path: "scripts/console-kernel.sh", reboot: true
       end
-      vm.vm.provision "shell", path: "scripts/common.sh",
+      vm.vm.provision "common", type: "shell", path: "scripts/common.sh",
         env: { "K8S_VERSION" => K8S_VERSION, "NODE_IP" => node[:ip] }
 
       if node[:role] == "control-plane"
-        vm.vm.provision "shell", path: "scripts/control-plane.sh",
+        vm.vm.provision "control-plane", type: "shell", path: "scripts/control-plane.sh",
           env: { "NODE_IP" => node[:ip], "POD_CIDR" => POD_CIDR }
       else
-        vm.vm.provision "shell", path: "scripts/worker.sh"
+        vm.vm.provision "worker", type: "shell", path: "scripts/worker.sh"
       end
 
       # Last, so the cluster is up before the (slow) desktop install starts

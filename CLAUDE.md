@@ -33,6 +33,7 @@ Host requirements: VirtualBox 7.x (7.1+ on Apple Silicon), Vagrant 2.4+, Docker,
 | `k8s/10-postgres.yaml` | Secret, PVC, StatefulSet (postgres:16-alpine), ClusterIP Service. |
 | `k8s/20-api.yaml` | Deployment (2 replicas, probes, limits, non-root securityContext), NodePort Service on 30080. |
 | `Makefile` | Workflow targets (below). |
+| `security/` | Security test routines, `make sectest` (`ROUTINE=NN` for one, `SKIP_SLOW=1` to skip Trivy/kube-bench). `lib.sh` has the PASS/FAIL helpers; `policies/` holds the NetworkPolicy and privileged-pod fixtures. Routines create and remove `sec-probe`/`sec-psa` namespaces and kube-bench Jobs. |
 | `docs/learn.md` | Learning guide: layer-by-layer explanation of the lab, guided walkthrough, exercises. |
 
 Generated, git-ignored files: `kubeconfig`, `join.sh`, `api-image.tar`, `.vagrant/`.
@@ -47,6 +48,7 @@ make deploy    # kubectl apply -f k8s/ and wait for rollouts
 make status    # nodes, pods, svc, pvc
 make logs      # tail API logs
 make test      # curl /healthz, POST a note, GET notes via 192.168.56.11:30080
+make sectest   # security routines in security/ (ROUTINE=NN, SKIP_SLOW=1)
 make down      # vagrant halt
 make clean     # vagrant destroy + remove generated files
 ```
@@ -86,7 +88,7 @@ Local run without the cluster: `cd app && pip install -r requirements.txt && uvi
 - **Security posture:** API pods run as non-root with `allowPrivilegeEscalation: false` and
   resource limits. Preserve these on any new workloads.
 - Shell scripts use `set -euo pipefail`; keep that. Validate YAML before committing.
-- **Provisioning is idempotent and re-runnable.** `vagrant provision` skips `kubeadm init`/`join` on initialized nodes. On arm64 hosts it also reboots every node (console-kernel provisioner), so expect a brief cluster blip; `control-plane.sh` waits for the API server before applying Flannel.
+- **Provisioning is idempotent and re-runnable.** `vagrant provision` skips `kubeadm init`/`join` on initialized nodes. On arm64 a full run reboots every node (console-kernel provisioner). Provisioners are named (`hosts`, `console-kernel`, `common`, `control-plane`, `worker`, `desktop`), so prefer `vagrant provision <node> --provision-with <name>` for one step; `control-plane.sh` waits for the API server.
 - **Desktop:** only one node gets it. Re-run just that step with `vagrant provision cp1 --provision-with desktop`. Closing the VM window must use "Continue running in background"; "Power off" halts the node (recover with `vagrant up <node>`).
 - **Console window:** on arm64 the VM display only works on the HWE kernel installed by `scripts/console-kernel.sh`. On the stock 5.15 kernel the window stops at "EFI stub: Exiting boot services" while the OS is fully up; use `vagrant ssh` instead.
 
@@ -96,9 +98,10 @@ Local run without the cluster: `cd app && pip install -r requirements.txt && uvi
 - Pods `Pending` with PVC unbound: run `make storage`.
 - Pods `ErrImageNeverPull` / `ImagePullBackOff`: run `make image`.
 - Nodes `NotReady`: Flannel not up — `kubectl -n kube-flannel get pods`; confirm the private-network interface (`enp0s8` or `eth1`) exists in the VM.
-- Pods can't resolve DNS / reach pods on other nodes (`Temporary failure in name resolution`, `nslookup` times out) while nodes are Ready: Flannel is advertising the NAT address. Check `kubectl get nodes -o custom-columns='NAME:.metadata.name,IP:.metadata.annotations.flannel\.alpha\.coreos\.com/public-ip'`; every node must show its 192.168.56.x address, not 10.0.2.15. Fix with `vagrant provision cp1` (re-applies Flannel with `--iface`), then delete the affected pods.
+- Pods can't resolve DNS / reach pods on other nodes (`Temporary failure in name resolution`, `nslookup` times out) while nodes are Ready: Flannel is advertising the NAT address. Check `kubectl get nodes -o custom-columns='NAME:.metadata.name,IP:.metadata.annotations.flannel\.alpha\.coreos\.com/public-ip'`; every node must show its 192.168.56.x address, not 10.0.2.15. Fix with `vagrant provision cp1 --provision-with control-plane` (re-applies Flannel with `--iface`, no reboot), then delete the affected pods.
 - `kubeadm init` preflight errors (ports in use, manifests exist, `/var/lib/etcd` not empty): provisioning was re-run on an initialized node. The scripts are idempotent, so this only happens with an old copy of `scripts/control-plane.sh`; `vagrant provision` is safe to re-run.
 - `mount.vboxsf: No such device` / `/vagrant` empty after a kernel change: Guest Additions modules are missing for the running kernel. Run `sudo /sbin/rcvboxadd quicksetup $(uname -r)` in the VM (see `scripts/console-kernel.sh` for the header patch 7.2.x needs on 6.8), then `vagrant reload <node>`.
 - kubelet fails with `running with swap on` after a reboot: `/etc/fstab` swap line not commented. `scripts/common.sh` handles the tab-separated line; re-run `vagrant provision <node>`.
 - Desktop shows a black screen but `lightdm`/`xfce4-session` are running: the display output got disabled (on ARM64 the ramfb display cannot resize; `VBoxClient --vmsvga` reacting to a host resize hint turns it off). `scripts/desktop.sh` installs `/usr/local/bin/vbox-display-fix` and sets `GUI/AutoresizeGuest=off`; as a one-off, run `xrandr --output None-1 --auto` inside the session.
+- Console login "fails": credentials are `vagrant` / `vagrant` on every node (bento box default; verify with `echo vagrant | pamtester login vagrant authenticate`). The tty banner prints them; press Enter to redraw the prompt. The desktop has no lock screen (`desktop.sh` purges `xfce4-screensaver`).
 - API `/readyz` returns 503: Postgres not ready yet or `DATABASE_URL` wrong.

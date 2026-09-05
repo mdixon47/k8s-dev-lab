@@ -20,6 +20,8 @@ else
     dbus-x11 xdg-utils fonts-dejavu mousepad
   apt-get install -y -q firefox
 fi
+# No lock screen in a lab: it only asks for the vagrant password and confuses people.
+apt-get purge -y -q xfce4-screensaver light-locker xscreensaver 2>/dev/null || true
 
 # Auto-login straight into XFCE (dev sandbox; the vagrant account is already passwordless sudo)
 mkdir -p /etc/lightdm/lightdm.conf.d
@@ -45,6 +47,7 @@ fi
 # screen behind a running desktop. Stop that service at login and keep the output enabled.
 cat >/usr/local/bin/vbox-display-fix <<'F'
 #!/usr/bin/env bash
+xset s off -dpms 2>/dev/null || true
 for _ in $(seq 1 15); do
   pkill -f 'VBoxClient --vmsvg[a]' 2>/dev/null || true
   for out in $(xrandr 2>/dev/null | awk '/ connected/ {print $1}'); do
@@ -65,5 +68,6 @@ D
 
 systemctl set-default graphical.target
 systemctl enable lightdm
-systemctl restart lightdm
+# Don't kick a logged-in user off the desktop when this script is re-run
+systemctl is-active -q lightdm || systemctl start lightdm
 echo "Desktop ready: open the VM in the VirtualBox app and click Show"
