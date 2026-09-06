@@ -15,6 +15,15 @@ CONSOLE_KERNEL = ENV.fetch("K8S_CONSOLE_KERNEL", HOST_ARM64 ? "1" : "0") == "1"
 DESKTOP_NODE = ENV.fetch("K8S_DESKTOP", "cp1")
 DESKTOP_MEM  = 4096
 DESKTOP_CPUS = 4
+# Vagrant boots every VM headless. K8S_GUI=1 opens the VirtualBox window for the desktop node,
+# K8S_GUI=all for every node, K8S_GUI=cp1,w1 for a list. Close windows with "Continue running
+# in background"; "Power off" halts the node (vagrant up <node> recovers it).
+GUI_NODES = case ENV.fetch("K8S_GUI", "")
+            when ""    then []
+            when "1"   then [DESKTOP_NODE]
+            when "all" then :all
+            else ENV["K8S_GUI"].split(",").map(&:strip)
+            end
 
 NODES = [
   { name: "cp1", ip: "#{NET_PREFIX}.10", cpus: 2, mem: 2048, role: "control-plane" },
@@ -42,6 +51,7 @@ Vagrant.configure("2") do |config|
 
       vm.vm.provider "virtualbox" do |vb|
         vb.name   = "k8s-#{node[:name]}"
+        vb.gui    = GUI_NODES == :all || GUI_NODES.include?(node[:name])
         vb.cpus   = desktop ? [node[:cpus], DESKTOP_CPUS].max : node[:cpus]
         vb.memory = desktop ? [node[:mem], DESKTOP_MEM].max : node[:mem]
         vb.customize ["modifyvm", :id, "--nested-hw-virt", "on"] unless HOST_ARM64

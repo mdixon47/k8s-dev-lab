@@ -57,6 +57,7 @@ app is at `http://192.168.56.11:30080/docs`.
 | `K8S_DESKTOP` | `cp1` | Node that gets the desktop, 4 GB RAM and 4 CPUs. `""` for none. |
 | `K8S_CONSOLE_KERNEL` | `1` on arm64, `0` otherwise | Install Ubuntu's HWE kernel so the VM console window shows output (one reboot per node during `make up`). Required for the desktop on arm64. |
 | `K8S_BOX` | by host arch | Override the Vagrant box. |
+| `K8S_GUI` | unset (headless) | `1` opens the VirtualBox window for the desktop node at boot, `all` for every node, `cp1,w1` for a list. A running headless node's window opens from the VirtualBox Manager (select it, Show). |
 
 ## The web edge
 `web` is a plain VM outside Kubernetes running nginx, the way a load balancer or bastion

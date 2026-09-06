@@ -66,7 +66,7 @@ Layers, bottom to top:
   or bastion sits in front of a real cluster. It exists so you can practise the edge: TLS, headers,
   failover when a worker dies, and what an attacker on the LAN sees first.
 - One node (`DESKTOP_NODE`, default `cp1`) is sized up to 4 GB / 4 CPUs and gets a desktop.
-  Three environment variables (`K8S_DESKTOP`, `K8S_CONSOLE_KERNEL`, `K8S_BOX`) tune this
+  Four environment variables (`K8S_DESKTOP`, `K8S_CONSOLE_KERNEL`, `K8S_BOX`, `K8S_GUI`) tune this
   without editing the file; see the README.
 
 **Concept: the NAT trap.** Every VM's NAT interface has the *same* address, 10.0.2.15.

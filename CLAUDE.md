@@ -21,7 +21,7 @@ Host requirements: VirtualBox 7.x (7.1+ on Apple Silicon), Vagrant 2.4+, Docker,
 
 | Path | Purpose |
 |------|---------|
-| `Vagrantfile` | VM/node definitions. `NODES` array controls count, IPs, CPU, RAM. Constants: `K8S_VERSION`, `POD_CIDR`, `NET_PREFIX`, `BOX` (auto-selected by host arch: `ubuntu/jammy64` on amd64, `bento/ubuntu-22.04` on arm64; override with `K8S_BOX`). |
+| `Vagrantfile` | VM/node definitions. `NODES` array controls count, IPs, CPU, RAM. Constants: `K8S_VERSION`, `POD_CIDR`, `NET_PREFIX`, `BOX` (auto-selected by host arch: `ubuntu/jammy64` on amd64, `bento/ubuntu-22.04` on arm64; override with `K8S_BOX`). VMs boot headless; `K8S_GUI=1` opens the VirtualBox window for the desktop node, `K8S_GUI=all` for every node, `K8S_GUI=cp1,w1` for a list. |
 | `scripts/console-kernel.sh` | arm64 only (`CONSOLE_KERNEL` in the Vagrantfile, override `K8S_CONSOLE_KERNEL=0|1`): installs the 22.04 HWE kernel (6.8) so the VirtualBox console window shows output, patches and rebuilds Oracle Guest Additions (vboxsf backs `/vagrant`) for it. Vagrant reboots the node afterwards. |
 | `scripts/desktop.sh` | XFCE desktop + Firefox on `DESKTOP_NODE` (Vagrantfile, default `cp1`, override `K8S_DESKTOP=<node>` or `""`). That node is sized up to `DESKTOP_MEM`/`DESKTOP_CPUS` (4 GB / 4 CPUs) and gets a bidirectional clipboard. Auto-logs in as `vagrant`. Needs a framebuffer, i.e. the console kernel on arm64. Runs last so the cluster is up first. |
 | `scripts/common.sh` | Runs on every node: kernel modules, sysctl, swap off, containerd (SystemdCgroup), kubeadm/kubelet/kubectl from pkgs.k8s.io, pins kubelet `--node-ip`. |
@@ -97,7 +97,7 @@ Local run without the cluster: `cd app && pip install -r requirements.txt && uvi
 - Shell scripts use `set -euo pipefail`; keep that. Validate YAML before committing.
 - **Provisioning is idempotent and re-runnable.** `vagrant provision` skips `kubeadm init`/`join` on initialized nodes. On arm64 a full run reboots every node (console-kernel provisioner). Provisioners are named (`hosts`, `console-kernel`, `common`, `control-plane`, `worker`, `desktop`), so prefer `vagrant provision <node> --provision-with <name>` for one step; `control-plane.sh` waits for the API server.
 - **Desktop:** only one node gets it. Re-run just that step with `vagrant provision cp1 --provision-with desktop`. Closing the VM window must use "Continue running in background"; "Power off" halts the node (recover with `vagrant up <node>`).
-- **Console window:** on arm64 the VM display only works on the HWE kernel installed by `scripts/console-kernel.sh`. On the stock 5.15 kernel the window stops at "EFI stub: Exiting boot services" while the OS is fully up; use `vagrant ssh` instead.
+- **Console window:** VMs boot headless. Open a running node's window from the VirtualBox Manager (select it, Show), or boot with `K8S_GUI=1 make up` (desktop node) / `K8S_GUI=all`. `VBoxManage startvm` on a running node fails with "already locked by a session"; that is expected. On arm64 the VM display only works on the HWE kernel installed by `scripts/console-kernel.sh`. On the stock 5.15 kernel the window stops at "EFI stub: Exiting boot services" while the OS is fully up; use `vagrant ssh` instead.
 
 ## Troubleshooting
 
