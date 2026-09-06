@@ -200,7 +200,20 @@ display service tries to honour it, `ramfb` cannot change mode, and the only out
 left *disabled*: a black screen behind a running desktop. The script stops that service at
 login and re-enables the output, and the VM is configured not to send the hint at all.
 
-**Try it:** on cp1, `cat /sys/class/drm/card0-*/enabled` and `xrandr` from a desktop
+**Headless or windowed.** Vagrant starts every VM with `VBoxManage startvm --type headless`,
+so the guest runs and renders its framebuffer with no window on the Mac. A VirtualBox VM
+is always exactly one host process, `VBoxHeadless` or `VirtualBoxVM`, and that process
+holds the machine's session lock. Two consequences: `VBoxManage startvm` against a
+running node fails with "already locked by a session" (nothing is wrong, the lock is
+doing its job), and the Manager's **Show** button does not start anything, it attaches a
+window to the process that already exists. `K8S_GUI=1` makes Vagrant pass `--type gui`
+instead, but only for machines it actually boots; `vagrant up` leaves running VMs alone.
+The frontend is not remembered: a node started headless stays headless until its next boot.
+
+**Try it:** `VBoxManage showvminfo k8s-cp1 --machinereadable | grep SessionName` says
+`headless` or `GUI/Qt`. `VBoxManage controlvm k8s-cp1 screenshotpng cp1.png` captures the
+guest's screen either way, which is the quickest proof that a "blank" VM is rendering fine.
+On cp1, `cat /sys/class/drm/card0-*/enabled` and `xrandr` from a desktop
 terminal. Then `vagrant ssh cp1` and compare `uname -r` with w1 (both 6.8) against what a
 fresh `bento/ubuntu-22.04` box ships (5.15).
 
@@ -212,6 +225,7 @@ Do these in order on a fresh clone and observe the cluster state changing.
 
 ```bash
 make up                       # 15-20 min. Watch kubeadm's output on cp1 (arm64: each node reboots once).
+                              # (`make all` chains every step below; do them by hand this once.)
 export KUBECONFIG="$PWD/kubeconfig"
 kubectl get nodes             # all Ready once Flannel is up
 kubectl -n kube-flannel get pods -o wide
@@ -233,7 +247,8 @@ for i in 1 2 3 4; do curl -s 192.168.56.11:30080/healthz; echo; done   # pod nam
 vagrant provision cp1         # safe re-run: "already initialized; skipping kubeadm init"
 ```
 
-Then open the VirtualBox app, select `k8s-cp1`, click **Show**, and in the desktop:
+Then open the VirtualBox app, select `k8s-cp1`, click **Show** (or boot the node with
+`K8S_GUI=1 vagrant up cp1` after a `vagrant halt cp1`), and in the desktop:
 
 - Open Firefox at `http://192.168.56.11:30080/docs` and POST a note from the Swagger UI.
 - Open a terminal and run `kubectl -n devapp get pods -o wide`; the node has admin access
@@ -283,11 +298,16 @@ troubleshooting table in `CLAUDE.md`.
 13. **Power off from the window, on purpose.** Close w2's console window with "Power off".
     Watch `kubectl get nodes` mark it NotReady after about 40 s, see which pods were on it,
     then `vagrant up w2` and watch them come back.
+14. **One process per VM.** With cp1 running headless, run `VBoxManage startvm k8s-cp1 --type gui`
+    and read the "already locked" error. Then `vagrant halt cp1`, `K8S_GUI=1 vagrant up cp1`,
+    and compare `VBoxManage showvminfo k8s-cp1 --machinereadable | grep SessionName` before and
+    after. Finally run `K8S_GUI=1 make up` with everything already running and explain why no
+    window appears.
 
-14. **Failover at the edge.** `watch curl -s http://192.168.56.20/api/healthz` (the pod name
+15. **Failover at the edge.** `watch curl -s http://192.168.56.20/api/healthz` (the pod name
     alternates), then `vagrant halt w2`. Requests keep succeeding via w1; nginx marks the dead
     upstream after two failures. `vagrant up w2` and watch it return to rotation.
-15. **Inspect the edge.** `curl -skI https://192.168.56.20/` and read the headers nginx adds.
+16. **Inspect the edge.** `curl -skI https://192.168.56.20/` and read the headers nginx adds.
     Then `openssl s_client -connect 192.168.56.20:443 </dev/null | head` to see why your browser
     warns: the cert is self-signed. Replace it with one from a local CA you create with openssl.
 
@@ -309,6 +329,8 @@ You have understood the lab when you can answer these without looking:
 - Why can `vagrant provision` be re-run on a live cluster, and which two files make that decision?
 - Why does the VM console show only EFI messages on the stock kernel while SSH works fine?
 - What breaks when you change a VM's kernel, and why does `/vagrant` depend on it?
+- Why does `VBoxManage startvm` on a running node say "already locked", and why does
+  `K8S_GUI=1 make up` open no window when the VMs are already up?
 
 ---
 

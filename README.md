@@ -28,6 +28,8 @@ make deploy    # apply k8s/ manifests
 make test      # curl the API (30080), the site (30081), and the web edge
 ```
 
+`make all` runs those five steps in order and stops at the first failure.
+
 `kubectl` works from the host once the cluster is up:
 ```bash
 export KUBECONFIG="$PWD/kubeconfig"
@@ -45,6 +47,15 @@ app is at `http://192.168.56.11:30080/docs`.
 
 - Close the window with **Continue running in background**. **Power off** halts the node;
   recover with `vagrant up cp1`.
+- To have the window open by itself, boot with `K8S_GUI=1 make up` (`make up K8S_GUI=1`
+  works too). The flag only acts when a VM *boots*: `vagrant up` skips machines that are
+  already running, so halt first (`vagrant halt cp1`, then `K8S_GUI=1 vagrant up cp1`).
+  The window can open behind other apps; look for VirtualBox in the Dock.
+- Each VM has exactly one VirtualBox process, headless (`VBoxHeadless`) or windowed
+  (`VirtualBoxVM`). `VBoxManage startvm k8s-cp1` on a running node therefore fails with
+  "already locked by a session"; that is normal, use **Show** instead.
+- To see what a headless VM's screen shows without opening a window:
+  `VBoxManage controlvm k8s-cp1 screenshotpng cp1.png`.
 - The screen is fixed at 1280x800 (VirtualBox's ARM64 display cannot resize).
 - The desktop never locks; there is no screensaver password to remember.
 - `w1` and `w2` have a text console only: log in as `vagrant` / `vagrant` (the banner
