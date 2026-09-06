@@ -46,6 +46,7 @@ Generated, git-ignored files: `kubeconfig`, `join.sh`, `*-image.tar`, `.vagrant/
 ## Common commands
 
 ```bash
+make all       # up → storage → image → deploy → test in one command
 make up        # vagrant up — provisions cluster (10–15 min first run)
 make storage   # install local-path-provisioner and set it as default StorageClass
 make image     # build api + web images and load onto workers (IMAGES=web for one)
@@ -60,7 +61,7 @@ make clean     # vagrant destroy + remove generated files
 
 `kubectl` from the host: `export KUBECONFIG="$PWD/kubeconfig"`.
 
-Run order for a fresh clone: `up → storage → image → deploy → test`.
+Run order for a fresh clone: `up → storage → image → deploy → test` (`make all` runs them in order, stopping at the first failure).
 `storage` must precede `deploy` or the Postgres PVC stays Pending.
 
 ## Development loop

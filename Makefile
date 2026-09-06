@@ -1,7 +1,9 @@
 KUBECONFIG ?= $(CURDIR)/kubeconfig
 KUBECTL     = KUBECONFIG="$(KUBECONFIG)" kubectl
 
-.PHONY: up down storage image deploy status logs test sectest clean
+.PHONY: all up down storage image deploy status logs test sectest clean
+
+all: up storage image deploy test   ## Fresh clone to running app in one command
 
 up:            ## Create the 3-node cluster (10-15 min first run)
 	vagrant up
