@@ -1,12 +1,26 @@
 KUBECONFIG ?= $(CURDIR)/kubeconfig
 KUBECTL     = KUBECONFIG="$(KUBECONFIG)" kubectl
 
-.PHONY: all up down storage image deploy status logs test sectest clean
+# make up VBOX_APP=0 leaves the VirtualBox Manager closed (CI, ssh sessions)
+VBOX_APP   ?= 1
+GATEKEEPER_VERSION ?= v3.23.1
+
+.PHONY: all up vbox down storage image deploy policy status logs test sectest clean
 
 all: up storage image deploy test   ## Fresh clone to running app in one command
 
-up:            ## Create the 3-node cluster (10-15 min first run)
+up: vbox       ## Open VirtualBox, then create the 3-node cluster (10-15 min first run)
 	vagrant up
+
+vbox:          ## Launch and bring the VirtualBox Manager to the front so the VMs are visible as they boot
+	@if [ "$(VBOX_APP)" = "1" ]; then \
+	  case "$$(uname -s)" in \
+	    Darwin) open -a VirtualBox 2>/dev/null || echo "VirtualBox.app not found; VMs still boot headless" ;; \
+	    Linux)  if [ -n "$$DISPLAY$$WAYLAND_DISPLAY" ] && command -v VirtualBox >/dev/null 2>&1; then \
+	              pgrep -x VirtualBox >/dev/null || (VirtualBox >/dev/null 2>&1 &); \
+	            fi ;; \
+	  esac; \
+	fi
 
 down:          ## Stop VMs, keep state
 	vagrant halt
@@ -24,9 +38,13 @@ deploy:        ## Apply all manifests
 	$(KUBECTL) -n devapp rollout status deployment/api
 	$(KUBECTL) -n devapp rollout status deployment/web
 
+policy:        ## Install OPA Gatekeeper and the lab's constraints (policy/); GATEKEEPER_VERSION=vX.Y.Z to pin
+	KUBECONFIG="$(KUBECONFIG)" GATEKEEPER_VERSION="$(GATEKEEPER_VERSION)" ./scripts/gatekeeper.sh
+
 status:
 	$(KUBECTL) get nodes -o wide
 	$(KUBECTL) -n devapp get pods,svc,pvc
+	@$(KUBECTL) get constraints -o wide 2>/dev/null || true
 
 logs:
 	$(KUBECTL) -n devapp logs -l app=api -f

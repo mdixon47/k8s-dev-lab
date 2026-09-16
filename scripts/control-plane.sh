@@ -23,17 +23,18 @@ chown -R vagrant:vagrant /home/vagrant/.kube
 cp /etc/kubernetes/admin.conf /vagrant/kubeconfig
 export KUBECONFIG=/etc/kubernetes/admin.conf
 
-# After a reboot (console-kernel provisioner) the API server needs a moment
+# On a re-run right after boot the API server may still be coming up
 for i in $(seq 1 60); do
   kubectl get --raw=/healthz >/dev/null 2>&1 && break
   echo "Waiting for API server..."; sleep 5
 done
 
 # CNI: Flannel, pinned to the private-network interface (the one that owns NODE_IP;
-# enp0s8 on ubuntu/jammy64). Every node uses the same box, so the name is cluster-wide.
+# eth1 on bento/ubuntu-26.04, which boots with net.ifnames=0). Every node uses the same
+# box, so the name is cluster-wide.
 # kubectl apply is idempotent, so re-running is safe.
 IFACE="$(ip -o -4 addr show | awk -v ip="${NODE_IP}" '$4 ~ "^"ip"/" {print $2; exit}')"
-IFACE="${IFACE:-enp0s8}"
+IFACE="${IFACE:-eth1}"
 echo "Pinning Flannel to interface ${IFACE}"
 # The upstream manifest has used both a JSON-style args list ("--kube-subnet-mgr") and a
 # YAML block list (- --kube-subnet-mgr); handle both, then refuse to apply if neither

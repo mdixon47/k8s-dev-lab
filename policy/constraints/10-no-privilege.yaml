@@ -1,0 +1,18 @@
+# Constraint = a template applied to a scope. enforcementAction deny: the API server
+# rejects the request. Scoped to the app namespace and the security routines' sec-*
+# namespaces, so the default namespace stays a free sandbox for experiments.
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sLabNoPrivilege
+metadata:
+  name: no-privilege
+spec:
+  enforcementAction: deny
+  match:
+    namespaces: ["devapp", "sec-*"]
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+      - apiGroups: ["apps"]
+        kinds: ["Deployment", "StatefulSet", "DaemonSet"]
+      - apiGroups: ["batch"]
+        kinds: ["Job"]

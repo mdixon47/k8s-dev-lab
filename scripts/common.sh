@@ -21,7 +21,8 @@ swapoff -a && sed -i -E '/[[:space:]]swap[[:space:]]/ s/^([^#])/#\1/' /etc/fstab
 
 # containerd
 apt-get update -q
-apt-get install -y -q apt-transport-https ca-certificates curl gpg containerd
+# containerd 2.x (Ubuntu 26.04) writes a version-3 config; the SystemdCgroup key is unchanged
+apt-get install -y -q ca-certificates curl gpg containerd
 mkdir -p /etc/containerd
 containerd config default >/etc/containerd/config.toml
 sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml

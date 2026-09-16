@@ -13,7 +13,7 @@ SKIP_SLOW=1 make sectest     # skip Trivy and kube-bench
 
 Only `kubectl`, `jq`, `curl`, and `nc` are required. `06` needs [Trivy](https://trivy.dev)
 (`brew install trivy`) and Docker; `08` pulls the kube-bench image onto the nodes.
-All routines clean up after themselves (temporary namespaces `sec-probe`, `sec-psa`,
+All routines clean up after themselves (temporary namespaces `sec-probe`, `sec-psa`, `sec-gk`,
 and the kube-bench Jobs).
 
 | Routine | What it checks | Expected on the stock lab |
@@ -27,6 +27,7 @@ and the kube-bench Jobs).
 | `07-pod-security-admission` | Namespace PSA labels; proves `enforce=restricted` blocks a privileged pod; dry-runs the lab workloads against `restricted` to list what they violate | WARN: no labels; WARN: api and postgres violate restricted (capabilities, seccomp); PASS: web, the hardened reference manifest |
 | `08-kube-bench` | CIS Kubernetes Benchmark on the control plane and a worker | A few FAILs typical for kubeadm defaults (audit logging, file permissions) |
 | `09-exposure` | From the host: open ports per node, kubelet anonymous access, API server anonymous access, Swagger UI exposure | WARN: etcd and controller ports reachable on the LAN; WARN: `/docs` public |
+| `10-gatekeeper` | OPA Gatekeeper (after `make policy`): controller and audit up, webhook failure policy, the three lab constraints present; proves the `deny` constraint rejects the privileged pod in a `sec-*` namespace, that `warn` constraints admit postgres with warnings and the web pod cleanly; lists audit violations | SKIP until `make policy`. Then WARN: failurePolicy=Ignore; WARN: postgres violates non-root and resource-limits |
 
 ## Turning findings into exercises
 
@@ -36,7 +37,11 @@ and the kube-bench Jobs).
    `readOnlyRootFilesystem: true` (with an `emptyDir` on `/tmp`), and
    `automountServiceAccountToken: false` to the API Deployment. Re-run `07` until it passes,
    then label the namespace with `enforce=restricted`.
-3. **Make NetworkPolicy real.** Replace Flannel with Calico, re-run `04`, and watch the deny
+3. **Make admission policy bite.** After `make policy`, give `k8s/10-postgres.yaml` a
+   non-root securityContext (`runAsUser: 70`, `fsGroup: 70`, `allowPrivilegeEscalation: false`)
+   and limits, redeploy, wait for the audit count to reach 0, then change `enforcementAction`
+   to `deny` in `policy/constraints/` and re-run `10`.
+4. **Make NetworkPolicy real.** Replace Flannel with Calico, re-run `04`, and watch the deny
    policy start working. This is the single biggest security difference between CNIs.
 4. **Encrypt Secrets at rest.** Write an `EncryptionConfiguration`, add
    `--encryption-provider-config` to the kube-apiserver static pod manifest on cp1, and

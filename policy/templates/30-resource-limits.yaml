@@ -1,0 +1,31 @@
+# Every container needs CPU and memory limits, so one runaway process cannot starve a
+# 2 GB worker. Requests are left to the scheduler defaults on purpose.
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8slabresourcelimits
+  annotations:
+    description: Require cpu and memory limits on every container.
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sLabResourceLimits
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8slabresourcelimits
+
+        pod_spec = s { input.review.kind.kind == "Pod"; s := input.review.object.spec }
+        pod_spec = s { input.review.kind.kind != "Pod"; s := input.review.object.spec.template.spec }
+
+        containers[c] { c := pod_spec.containers[_] }
+        containers[c] { c := pod_spec.initContainers[_] }
+
+        violation[{"msg": msg}] {
+          c := containers[_]
+          resources := ["cpu", "memory"]
+          r := resources[_]
+          not c.resources.limits[r]
+          msg := sprintf("container %q has no %s limit", [c.name, r])
+        }

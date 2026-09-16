@@ -24,7 +24,7 @@ Read alongside [README.md](../README.md) (quick start) and [CLAUDE.md](../CLAUDE
 │   │ etcd, scheduler,    │  │ containerd         │  │ containerd │    │
 │   │ controller-manager  │  │ flannel, kube-proxy│  │ flannel    │    │
 │   │ kubelet, flannel    │  │ api pod  postgres  │  │ api pod    │    │
-│   │ XFCE desktop (opt.) │  │                    │  │            │    │
+│   │ GNOME desktop (opt.)│  │                    │  │            │    │
 │   └─────────────────────┘  └────────────────────┘  └────────────┘    │
 │        192.168.56.10            192.168.56.11         192.168.56.12  │
 └──────────────────────────────────────────────────────────────────────┘
@@ -41,7 +41,8 @@ Layers, bottom to top:
 | Storage | local-path-provisioner | `make storage` |
 | Image distribution | docker save → ctr import | `scripts/load-image.sh` |
 | Application | FastAPI + Postgres | `app/`, `k8s/` |
-| Console & desktop (optional) | HWE kernel, Guest Additions, XFCE | `scripts/console-kernel.sh`, `scripts/desktop.sh` |
+| Console & desktop (optional) | Guest Additions, Ubuntu (GNOME) desktop | `scripts/desktop.sh` |
+| Admission policy (optional) | OPA Gatekeeper, ConstraintTemplates, Constraints | `scripts/gatekeeper.sh`, `policy/` |
 
 ---
 
@@ -53,21 +54,23 @@ Layers, bottom to top:
 - Each VM gets **two NICs**. VirtualBox always adds a NAT adapter (internet access), and
   `private_network` adds a host-only adapter on `192.168.56.0/24` so the VMs and the host
   can reach each other by fixed IP.
-- The box is chosen by host CPU architecture. `ubuntu/jammy64` is amd64-only, so Apple
-  Silicon hosts get `bento/ubuntu-22.04`, which ships an arm64 VirtualBox build.
+- The box is `bento/ubuntu-26.04` (Ubuntu 26.04 LTS, Linux 7.0) on every host. Canonical
+  stopped publishing official Vagrant boxes after 22.04; bento ships VirtualBox builds for
+  both amd64 and arm64, so Apple Silicon hosts need no special case.
 - The synced folder `/vagrant` mirrors the repo inside every VM. This is how the control
   plane hands `kubeconfig` and `join.sh` to the host and to the workers with no extra tooling.
   It is backed by the `vboxsf` kernel module from VirtualBox Guest Additions, which matters
   in section 2.7.
-- The host-only interface is named `enp0s8` on `ubuntu/jammy64` and `eth1` on the bento
-  arm64 box. The scripts never hard-code it; they look up which interface owns `NODE_IP`.
+- The host-only interface is `eth1`: the bento box boots with `net.ifnames=0`, so NICs keep
+  classic names instead of `enp0s8`. The scripts never hard-code it; they look up which
+  interface owns `NODE_IP`, so a different box still works.
 - `role` decides what a VM becomes. `control-plane` and `worker` are kubeadm nodes; `web` is a
   plain nginx box outside the cluster that proxies to the API's NodePort, the way a load balancer
   or bastion sits in front of a real cluster. It exists so you can practise the edge: TLS, headers,
   failover when a worker dies, and what an attacker on the LAN sees first.
 - One node (`DESKTOP_NODE`, default `cp1`) is sized up to 4 GB / 4 CPUs and gets a desktop.
-  Four environment variables (`K8S_DESKTOP`, `K8S_CONSOLE_KERNEL`, `K8S_BOX`, `K8S_GUI`) tune this
-  without editing the file; see the README.
+  Three environment variables (`K8S_DESKTOP`, `K8S_BOX`, `K8S_GUI`) tune this without editing
+  the file; see the README.
 
 **Concept: the NAT trap.** Every VM's NAT interface has the *same* address, 10.0.2.15.
 If kubelet or Flannel picks that interface, nodes cannot talk to each other. The lab
@@ -169,32 +172,37 @@ Manifest walk-through:
   space, `capabilities.drop: [ALL]`, `seccompProfile`, `automountServiceAccountToken: false`).
   `make sectest ROUTINE=07` shows one passing `restricted` and the other not.
 
-### 2.7 Console and desktop (`scripts/console-kernel.sh`, `scripts/desktop.sh`)
+### 2.7 Console and desktop (`scripts/desktop.sh`)
 
 This layer is optional for the cluster but a good lesson in how firmware, kernel drivers,
 and hypervisor tooling fit together.
 
-**Why the console is blank on the stock kernel.** On Apple Silicon, VirtualBox gives ARM64
-guests a very simple display device (QEMU's `ramfb`) and boots them with EFI. Ubuntu 22.04's
-5.15 kernel has no driver that can take over that framebuffer after EFI hands off, so the
-console window stops at "EFI stub: Exiting boot services" even though the OS is fully up
-and SSH works. Inside the guest you can confirm it: there is no `/dev/fb0` and `dmesg` shows
-only a dummy console.
+**How the console gets a picture.** On Apple Silicon, VirtualBox gives ARM64 guests a very
+simple display device (QEMU's `ramfb`) and boots them with EFI. The firmware sets up a
+framebuffer and hands its address to the kernel, and the kernel needs a driver that can
+take that framebuffer over after "EFI stub: Exiting boot services". That driver is
+`simpledrm`, and Ubuntu 26.04's 7.0 kernel ships it, so the console window shows boot
+messages and a login prompt with no extra work. Inside the guest, `ls /dev/dri` shows the
+device and `dmesg | grep -i simple` shows the driver claiming the EFI framebuffer.
 
-**The fix, and what it costs.** Ubuntu's HWE kernel (6.8) ships `simpledrm`, which drives
-the EFI-provided framebuffer, so a login prompt appears. Two things break when you change
-the kernel, and the script handles both:
+**Why this used to be hard.** Ubuntu 22.04's 5.15 kernel had no such driver, so the window
+froze at the EFI stub line while the OS was fully up and SSH worked. The workaround was to
+install a newer HWE kernel, which then broke two more things: VirtualBox Guest Additions
+(`vboxsf` for `/vagrant`, `vboxguest` for the clipboard) are kernel modules built per
+kernel and had to be rebuilt with `rcvboxadd quicksetup <version>`, and a header mismatch
+between the Additions and the backported kernel needed a patch before they would compile.
+Moving the lab to 26.04 removed all of that. The lesson stands: any kernel change in a
+VirtualBox guest means rebuilding the Additions, and `/vagrant` disappearing after a kernel
+upgrade is the symptom (see the troubleshooting table in CLAUDE.md).
 
-1. Guest Additions kernel modules (`vboxsf` for `/vagrant`, `vboxguest` for the clipboard)
-   are built per kernel. The script installs the compiler the kernel was built with and
-   rebuilds them with `rcvboxadd quicksetup <version>`.
-2. Guest Additions 7.2 expects a kernel symbol rename to happen at 6.9, but Ubuntu
-   backported it into 6.8. A one-line header patch fixes the build.
-
-Vagrant then reboots the node so the new kernel is running before kubeadm touches it.
-
-**The desktop.** `desktop.sh` installs XFCE, Firefox, and LightDM with auto-login as
-`vagrant`, then runs Guest Additions' X11 setup for the shared clipboard. One more trap:
+**The desktop.** `desktop.sh` installs the stock Ubuntu desktop (`ubuntu-desktop-minimal`:
+GNOME Shell, the Ubuntu dock, Firefox, App Center) and GDM with auto-login as `vagrant` (a
+Wayland session; Guest Additions' clipboard service attaches to XWayland and mutter bridges it
+to Wayland apps), then runs Guest Additions' X11 setup so that clipboard service autostarts
+with the session. Copy/paste with the Mac then works both ways, with one catch: Left ⌘ is
+VirtualBox's host key, so ⌘V is swallowed by VirtualBox. Inside the window it is Ctrl+V in
+apps and Ctrl+Shift+V in the terminal; `wl-paste` prints the Mac clipboard if you want
+proof the link works. One more trap:
 when the VirtualBox window opens it sends a "resize to fit" hint, the Guest Additions
 display service tries to honour it, `ramfb` cannot change mode, and the only output is
 left *disabled*: a black screen behind a running desktop. The script stops that service at
@@ -206,16 +214,54 @@ is always exactly one host process, `VBoxHeadless` or `VirtualBoxVM`, and that p
 holds the machine's session lock. Two consequences: `VBoxManage startvm` against a
 running node fails with "already locked by a session" (nothing is wrong, the lock is
 doing its job), and the Manager's **Show** button does not start anything, it attaches a
-window to the process that already exists. `K8S_GUI=1` makes Vagrant pass `--type gui`
-instead, but only for machines it actually boots; `vagrant up` leaves running VMs alone.
+window to the process that already exists. For the desktop node Vagrant passes `--type gui`
+instead (`K8S_GUI=1`, the default; `K8S_GUI=0` for headless), but only for machines it actually boots; `vagrant up` leaves running VMs alone.
 The frontend is not remembered: a node started headless stays headless until its next boot.
 
 **Try it:** `VBoxManage showvminfo k8s-cp1 --machinereadable | grep SessionName` says
 `headless` or `GUI/Qt`. `VBoxManage controlvm k8s-cp1 screenshotpng cp1.png` captures the
 guest's screen either way, which is the quickest proof that a "blank" VM is rendering fine.
 On cp1, `cat /sys/class/drm/card0-*/enabled` and `xrandr` from a desktop
-terminal. Then `vagrant ssh cp1` and compare `uname -r` with w1 (both 6.8) against what a
-fresh `bento/ubuntu-22.04` box ships (5.15).
+terminal. Then `vagrant ssh cp1` and run `uname -r` (7.0) and `lsmod | grep vboxsf` to see
+the kernel and the Guest Additions module that backs `/vagrant`.
+
+### 2.8 Admission policy (`scripts/gatekeeper.sh`, `policy/`)
+
+Everything so far *describes* a secure posture (non-root, no privilege escalation, limits)
+and `security/01-pod-spec-audit.sh` checks it after the fact. Nothing stops someone from
+applying a privileged pod. `make policy` adds the missing enforcement layer:
+[OPA Gatekeeper](https://github.com/open-policy-agent/gatekeeper), a **validating
+admission webhook**. Every create or update goes API server → authentication → authorization
+→ admission → etcd; Gatekeeper sits in the admission step and can reject the request, warn,
+or just record it.
+
+**Three objects.** A `ConstraintTemplate` (`policy/templates/`) holds the rule, written in
+Rego, and declares a new CRD kind such as `K8sLabNoPrivilege`. A `Constraint`
+(`policy/constraints/`) is an instance of that kind: it says *where* the rule applies
+(`match.namespaces: [devapp, sec-*]`, which kinds) and *how hard* (`enforcementAction`:
+`deny`, `warn`, or `dryrun`). Gatekeeper's `audit` deployment re-evaluates every constraint
+against what already exists every 60 s and writes the results to the constraint's
+`status.violations`, which is how you find the pods that were admitted before the rule existed.
+
+**Why two of the three constraints only warn.** `k8s/10-postgres.yaml` has no
+`securityContext` and no limits. With `deny`, `make deploy` on a fresh clone would fail at
+the StatefulSet. With `warn`, the apply succeeds, `kubectl` prints a `Warning:` line per
+violation, and the audit counts it. That is the normal rollout path for a new policy in a
+real cluster: `dryrun` → `warn` → fix the offenders → `deny`.
+
+**Try it:** `make policy`, then
+
+```bash
+kubectl get constraints -o wide                     # ENFORCEMENT-ACTION, TOTAL-VIOLATIONS
+kubectl -n devapp apply -f security/policies/privileged-pod.yaml   # denied, five reasons listed
+kubectl apply -f security/policies/privileged-pod.yaml             # default namespace: admitted!
+kubectl delete pod sec-test-privileged
+kubectl get k8slabnonroot non-root -o jsonpath='{.status.violations}' | jq .
+```
+
+Read `policy/templates/10-no-privilege.yaml`: each `violation[...]` block is one rule, and
+`pod_spec` picks `spec` or `spec.template.spec` depending on the kind, which is why applying
+the StatefulSet itself warns, not only the pod it creates.
 
 ---
 
@@ -224,12 +270,58 @@ fresh `bento/ubuntu-22.04` box ships (5.15).
 Do these in order on a fresh clone and observe the cluster state changing.
 
 ```bash
-make up                       # 15-20 min. Watch kubeadm's output on cp1 (arm64: each node reboots once).
+make up                       # 15-20 min. Opens the VirtualBox app and cp1's window;
+                              # kubeadm's output scrolls in this terminal.
                               # (`make all` chains every step below; do them by hand this once.)
 export KUBECONFIG="$PWD/kubeconfig"
 kubectl get nodes             # all Ready once Flannel is up
 kubectl -n kube-flannel get pods -o wide
+kubectl get pods              # "No resources found in default namespace": nothing deployed yet
+```
 
+**A pod by hand, before the app.** A pod is one or more containers sharing a network
+namespace and an IP; it is the unit the scheduler places and the kubelet runs. Create one
+directly, with the same security posture the app's manifests use (non-root, no privilege
+escalation, resource limits) and a public image so no `make image` is needed:
+
+```bash
+cat > hello-pod.yaml <<'EOF'
+apiVersion: v1
+kind: Pod
+metadata:
+  name: hello
+  labels:
+    app: hello
+spec:
+  containers:
+    - name: web
+      image: nginxinc/nginx-unprivileged:alpine
+      ports:
+        - containerPort: 8080
+      resources:
+        requests: { cpu: 50m, memory: 32Mi }
+        limits:   { cpu: 200m, memory: 64Mi }
+      securityContext:
+        runAsNonRoot: true
+        allowPrivilegeEscalation: false
+EOF
+kubectl apply -f hello-pod.yaml
+kubectl get pod hello -w      # Pending (scheduling) → ContainerCreating (image pull) → Running
+kubectl get pod hello -o wide # the node it landed on and its 10.244.x.x pod IP
+kubectl describe pod hello    # Events at the bottom explain any stall
+kubectl logs hello
+kubectl exec -it hello -- sh  # a shell inside the container; `exit` to leave
+kubectl port-forward pod/hello 8080:8080   # then curl localhost:8080 from another terminal
+kubectl delete pod hello
+kubectl get pods              # gone; nothing recreates a bare pod
+```
+
+That last observation is the whole reason `k8s/20-api.yaml` wraps the same kind of pod
+spec in a Deployment: a Deployment owns a ReplicaSet, which keeps the requested number of
+pods alive and replaces any that die. Compare its `template:` block with the manifest above.
+Now deploy the app:
+
+```bash
 make deploy                   # deliberately BEFORE storage
 kubectl -n devapp get pvc     # Pending
 kubectl -n devapp describe pvc postgres-data | tail -5   # "no storage class"
@@ -240,20 +332,31 @@ kubectl -n devapp get pods    # api pods: ErrImageNeverPull or ImagePullBackOff
 make image
 kubectl -n devapp rollout restart deployment/api
 kubectl -n devapp get pods -w # api pods reach Running, READY 1/1 once /readyz passes
+kubectl config set-context --current --namespace=devapp   # optional: stop typing -n devapp
 
 make test
 for i in 1 2 3 4; do curl -s 192.168.56.11:30080/healthz; echo; done   # pod name alternates
 
+make policy                   # Gatekeeper + policy/; ~1 min for the image pull
+kubectl -n devapp apply -f security/policies/privileged-pod.yaml   # denied by [no-privilege]
+kubectl apply -f k8s/10-postgres.yaml                              # unchanged, so no admission call;
+kubectl -n devapp rollout restart statefulset/postgres              # ...but the new pod is warned about
+kubectl get constraints -o wide                                    # postgres shows up in TOTAL-VIOLATIONS
+make sectest ROUTINE=10       # the routine proves deny, warn and audit in one run
+
 vagrant provision cp1         # safe re-run: "already initialized; skipping kubeadm init"
 ```
 
-Then open the VirtualBox app, select `k8s-cp1`, click **Show** (or boot the node with
-`K8S_GUI=1 vagrant up cp1` after a `vagrant halt cp1`), and in the desktop:
+cp1's VirtualBox window opened when it booted (if you closed it, open the VirtualBox app,
+select `k8s-cp1`, click **Show**). In the Ubuntu desktop:
 
 - Open Firefox at `http://192.168.56.11:30080/docs` and POST a note from the Swagger UI.
 - Open a terminal and run `kubectl -n devapp get pods -o wide`; the node has admin access
   through `~/.kube/config`.
-- Paste something from your Mac into the terminal to confirm the shared clipboard.
+- Paste something from your Mac into the terminal (Ctrl+Shift+V, not ⌘V) to confirm the
+  shared clipboard.
+- Note nothing above needed a VM restart. Kubernetes changes apply to the running cluster;
+  `make down` / `make up` halts and resumes the VMs with their state intact.
 
 ---
 
@@ -275,8 +378,8 @@ troubleshooting table in `CLAUDE.md`.
    `rollout restart`, and test it through the NodePort.
 6. **Add a worker.** Append `w3` at `192.168.56.13` to `NODES`, add it to the loop in
    `load-image.sh`, run `vagrant up w3`. If the join token has expired, regenerate it (see 2.3).
-7. **Break networking on purpose.** In a VM, `sudo ip link set eth1 down` (`enp0s8` on the
-   amd64 box; check `ip -o -4 addr` for the 192.168.56 address). Watch the node go `NotReady` and pods
+7. **Break networking on purpose.** In a VM, `sudo ip link set eth1 down` (check `ip -o -4 addr`
+   for the interface with the 192.168.56 address). Watch the node go `NotReady` and pods
    on it become unreachable. Bring it back up.
 8. **Read the control plane.** `vagrant ssh cp1`, then `sudo cat /etc/kubernetes/manifests/kube-apiserver.yaml`.
    Find the `--advertise-address` and `--service-cluster-ip-range` flags and relate them to
@@ -289,7 +392,7 @@ troubleshooting table in `CLAUDE.md`.
    `vagrant provision cp1 --provision-with control-plane` (re-applies Flannel without rebooting).
 10. **Re-provision without fear.** Run `vagrant provision` and read the output: which steps
     say "already ...; skipping", which re-run anyway (apt, Flannel apply, join token), and
-    why is that safe? On arm64, watch the nodes reboot and the cluster recover on its own.
+    why is that safe?
 11. **Swap on reboot.** On w1, uncomment the `/swap.img` line in `/etc/fstab`, `vagrant reload w1`,
     and read `journalctl -u kubelet`. Fix it by hand, then compare with what `common.sh` does.
 12. **Kill the desktop's display.** In a cp1 desktop terminal, `xrandr --output None-1 --off`.
@@ -298,18 +401,39 @@ troubleshooting table in `CLAUDE.md`.
 13. **Power off from the window, on purpose.** Close w2's console window with "Power off".
     Watch `kubectl get nodes` mark it NotReady after about 40 s, see which pods were on it,
     then `vagrant up w2` and watch them come back.
-14. **One process per VM.** With cp1 running headless, run `VBoxManage startvm k8s-cp1 --type gui`
-    and read the "already locked" error. Then `vagrant halt cp1`, `K8S_GUI=1 vagrant up cp1`,
-    and compare `VBoxManage showvminfo k8s-cp1 --machinereadable | grep SessionName` before and
-    after. Finally run `K8S_GUI=1 make up` with everything already running and explain why no
-    window appears.
+14. **One process per VM.** With cp1 running, run `VBoxManage startvm k8s-cp1 --type gui`
+    and read the "already locked" error. Then `vagrant halt cp1`, `K8S_GUI=0 vagrant up cp1`
+    (headless), and compare `VBoxManage showvminfo k8s-cp1 --machinereadable | grep SessionName`
+    with the windowed boot. Finally run `make up` with everything already running and explain
+    why no window appears.
+15. **Pod vs Deployment.** Create the bare `hello` pod from the walkthrough, then delete it
+    and one of the app's pods at the same time: `kubectl delete pod hello` and
+    `kubectl -n devapp delete pod -l app=api --wait=false`. Watch `kubectl get pods -A -w`.
+    Explain which pods come back, who brings them back, and why the new api pods have new names.
+16. **Rejoin a worker.** `vagrant ssh w1 -c 'sudo kubeadm reset -f'`, watch `kubectl get nodes`
+    mark w1 NotReady, then `vagrant provision w1 --provision-with worker` and watch it come
+    back. The join script in `join.sh` carries a token with a 24 h lifetime;
+    `kubeadm token create --print-join-command` on cp1 mints a fresh one when it has expired.
 
-15. **Failover at the edge.** `watch curl -s http://192.168.56.20/api/healthz` (the pod name
+17. **Failover at the edge.** `watch curl -s http://192.168.56.20/api/healthz` (the pod name
     alternates), then `vagrant halt w2`. Requests keep succeeding via w1; nginx marks the dead
     upstream after two failures. `vagrant up w2` and watch it return to rotation.
-16. **Inspect the edge.** `curl -skI https://192.168.56.20/` and read the headers nginx adds.
+18. **Inspect the edge.** `curl -skI https://192.168.56.20/` and read the headers nginx adds.
     Then `openssl s_client -connect 192.168.56.20:443 </dev/null | head` to see why your browser
     warns: the cert is self-signed. Replace it with one from a local CA you create with openssl.
+19. **Close the gate.** Give `k8s/10-postgres.yaml` a pod `securityContext` (`runAsUser: 70`,
+    `runAsGroup: 70`, `fsGroup: 70`, `runAsNonRoot: true`), `allowPrivilegeEscalation: false`
+    and cpu/memory limits on the container. `make deploy`, wait for
+    `kubectl get constraints -o wide` to show 0 violations, then change `enforcementAction`
+    to `deny` in `policy/constraints/20-non-root.yaml` and `30-resource-limits.yaml`,
+    `kubectl apply -f policy/constraints/`, and re-run `make sectest ROUTINE=10`.
+20. **Write a constraint.** Add a template that rejects images without a tag or with
+    `:latest` (hint: `endswith(c.image, ":latest")` and `not contains(c.image, ":")`), a
+    `warn` constraint for it, and apply both. Which of the lab's images trips it?
+21. **Kill the gatekeeper.** `kubectl -n gatekeeper-system scale deploy gatekeeper-controller-manager --replicas=0`,
+    apply the privileged pod in `devapp`, and explain why it went through
+    (`kubectl get validatingwebhookconfiguration gatekeeper-validating-webhook-configuration -o yaml | grep failurePolicy`).
+    Scale it back to 1 and delete the pod.
 
 ---
 
@@ -330,7 +454,15 @@ You have understood the lab when you can answer these without looking:
 - Why does the VM console show only EFI messages on the stock kernel while SSH works fine?
 - What breaks when you change a VM's kernel, and why does `/vagrant` depend on it?
 - Why does `VBoxManage startvm` on a running node say "already locked", and why does
-  `K8S_GUI=1 make up` open no window when the VMs are already up?
+  `make up` open no window when the VMs are already up?
+- Why does `kubectl get pods` show nothing while `make status` shows five running pods?
+- What happens to a pod created with `kubectl run` or a `kind: Pod` manifest when it dies,
+  and what does a Deployment add?
+- Why does ⌘V do nothing inside the VM window, and what does Ctrl+Shift+V do that Ctrl+V does not?
+- Where in the request path does Gatekeeper sit, and why can it not do anything about a pod
+  that was created before the constraint existed? What can?
+- What is the difference between a ConstraintTemplate and a Constraint, and why does the lab
+  ship two of its constraints as `warn` rather than `deny`?
 
 ---
 
@@ -342,7 +474,10 @@ You have understood the lab when you can answer these without looking:
 - Move the plaintext Secret to Sealed Secrets or External Secrets.
 - Install an Ingress controller (ingress-nginx via NodePort) and expose the API on a hostname.
 - Add a second control-plane node and a load balancer to see why HA needs a stable endpoint.
-- Run `make sectest` and work through [security/README.md](../security/README.md): nine routines
+- Run `make sectest` and work through [security/README.md](../security/README.md): ten routines
   that audit pod specs, probe from inside a container, check RBAC, prove Flannel ignores
   NetworkPolicy, read a Secret straight out of etcd, scan images, test Pod Security Admission,
-  run the CIS benchmark, and map what the nodes expose on the LAN. Each finding is a hardening exercise.
+  run the CIS benchmark, map what the nodes expose on the LAN, and exercise Gatekeeper.
+  Each finding is a hardening exercise.
+- Port the Rego templates in `policy/` to Gatekeeper's CEL engine (`K8sNativeValidation`) or
+  to a plain Kubernetes `ValidatingAdmissionPolicy`, which needs no webhook at all, and compare.

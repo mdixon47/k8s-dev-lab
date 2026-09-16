@@ -1,0 +1,47 @@
+# ConstraintTemplate = the rule, written in Rego, plus the schema of its parameters.
+# Gatekeeper turns each template into a CRD (kind K8sLabNoPrivilege) that the constraints
+# in ../constraints/ instantiate. Covers the escapes an attacker in a pod wants most:
+# privileged mode, host namespaces, and hostPath mounts.
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8slabnoprivilege
+  annotations:
+    description: Forbid privileged containers, host PID/IPC/network namespaces and hostPath volumes.
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sLabNoPrivilege
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8slabnoprivilege
+
+        # Pods carry the spec directly; Deployments, StatefulSets, DaemonSets and Jobs carry it
+        # under spec.template, so the same rule can warn on `kubectl apply` of the workload.
+        pod_spec = s { input.review.kind.kind == "Pod"; s := input.review.object.spec }
+        pod_spec = s { input.review.kind.kind != "Pod"; s := input.review.object.spec.template.spec }
+
+        containers[c] { c := pod_spec.containers[_] }
+        containers[c] { c := pod_spec.initContainers[_] }
+        containers[c] { c := pod_spec.ephemeralContainers[_] }
+
+        violation[{"msg": msg}] {
+          c := containers[_]
+          c.securityContext.privileged
+          msg := sprintf("container %q is privileged (securityContext.privileged: true)", [c.name])
+        }
+
+        violation[{"msg": msg}] {
+          host_fields := ["hostPID", "hostIPC", "hostNetwork"]
+          f := host_fields[_]
+          pod_spec[f]
+          msg := sprintf("%s: true shares a host namespace with the node", [f])
+        }
+
+        violation[{"msg": msg}] {
+          v := pod_spec.volumes[_]
+          v.hostPath
+          msg := sprintf("volume %q mounts host path %q", [v.name, v.hostPath.path])
+        }

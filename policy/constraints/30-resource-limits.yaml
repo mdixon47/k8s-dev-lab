@@ -1,0 +1,16 @@
+# warn for the same reason as 20-non-root.yaml: postgres has no limits yet.
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sLabResourceLimits
+metadata:
+  name: resource-limits
+spec:
+  enforcementAction: warn
+  match:
+    namespaces: ["devapp", "sec-*"]
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+      - apiGroups: ["apps"]
+        kinds: ["Deployment", "StatefulSet", "DaemonSet"]
+      - apiGroups: ["batch"]
+        kinds: ["Job"]

@@ -1,19 +1,19 @@
 # Kubernetes Dev Lab — VirtualBox + kubeadm + FastAPI/Postgres
 
-A reproducible local development environment: three Ubuntu 22.04 VMs on VirtualBox
+A reproducible local development environment: three Ubuntu 26.04 LTS VMs on VirtualBox
 form a real kubeadm cluster (1 control plane, 2 workers), and a FastAPI + Postgres
-sample app runs on it behind an nginx site, with a fourth VM acting as the edge. One node also gets a lightweight desktop so you can work
-inside the cluster from a VM window.
+sample app runs on it behind an nginx site, with a fourth VM acting as the edge. One node also gets the stock Ubuntu desktop (GNOME) and boots with its VirtualBox window
+open, so you can work inside the cluster from a VM window.
 
 ```
-Host ──vagrant──▶ cp1  192.168.56.10  (control plane, Flannel CNI, XFCE desktop)
+Host ──vagrant──▶ cp1  192.168.56.10  (control plane, Flannel CNI, Ubuntu desktop)
                   w1   192.168.56.11  (worker)
                   w2   192.168.56.12  (worker)
                   web  192.168.56.20  (edge: nginx reverse proxy, not in the cluster)
 ```
 
 ## Prerequisites (host)
-- VirtualBox 7.x (7.1+ on Apple Silicon; the Vagrantfile picks an arm64 box automatically)
+- VirtualBox 7.x (7.1+ on Apple Silicon; the `bento/ubuntu-26.04` box ships amd64 and arm64 builds)
 - Vagrant 2.4+
 - Docker (to build the API image)
 - kubectl, make, curl
@@ -21,11 +21,12 @@ Host ──vagrant──▶ cp1  192.168.56.10  (control plane, Flannel CNI, XFC
 
 ## Quick start
 ```bash
-make up        # provision VMs + cluster (first run pulls packages; 15–20 min)
+make up        # open the VirtualBox app, then provision VMs + cluster (15–20 min first run)
 make storage   # default StorageClass for the Postgres PVC
 make image     # build devapp/api:dev and devapp/web:dev, import into each worker's containerd
 make deploy    # apply k8s/ manifests
 make test      # curl the API (30080), the site (30081), and the web edge
+make policy    # optional: OPA Gatekeeper + the lab's admission policy (policy/)
 ```
 
 `make all` runs those five steps in order and stops at the first failure.
@@ -39,25 +40,40 @@ kubectl get nodes
 `make up` (and `vagrant provision`) can be re-run safely: the scripts skip `kubeadm init`
 and `kubeadm join` on nodes that are already part of the cluster.
 
+`make up` first launches the VirtualBox Manager and brings it to the front (`make vbox` does
+only that), so the `k8s-*` machines are visible as they boot and **Show** is one click away.
+The VMs themselves still start headless unless `K8S_GUI` is set. `make up VBOX_APP=0` skips
+the app, for CI or an ssh session with no display.
+
 ## Console and desktop
-Open the VirtualBox app, select `k8s-cp1`, and click **Show**. You land in an XFCE
-session as `vagrant` (password `vagrant`, passwordless `sudo`) with a terminal, Firefox,
-a working `kubectl`, and a clipboard shared with the host. The Swagger UI for the sample
-app is at `http://192.168.56.11:30080/docs`.
+`make up` boots `k8s-cp1` with its VirtualBox window open. You land in the stock Ubuntu
+desktop (GNOME Shell, the Ubuntu dock with Firefox, Files, App Center and Help, a Home
+folder on the desktop) as `vagrant` (password `vagrant`, passwordless `sudo`) with a
+terminal, a working `kubectl`, and a clipboard shared with the host. The Swagger UI for
+the sample app is at `http://192.168.56.11:30080/docs`.
 
 - Close the window with **Continue running in background**. **Power off** halts the node;
   recover with `vagrant up cp1`.
-- To have the window open by itself, boot with `K8S_GUI=1 make up` (`make up K8S_GUI=1`
-  works too). The flag only acts when a VM *boots*: `vagrant up` skips machines that are
-  already running, so halt first (`vagrant halt cp1`, then `K8S_GUI=1 vagrant up cp1`).
-  The window can open behind other apps; look for VirtualBox in the Dock.
+- The window opens only when the VM *boots*: `vagrant up` skips machines that are already
+  running. If cp1 is running headless, open the VirtualBox app, select `k8s-cp1` and click
+  **Show**, or `vagrant halt cp1` then `vagrant up cp1`. `K8S_GUI=0 make up` boots
+  everything headless. The window can open behind other apps; look for VirtualBox in the Dock.
 - Each VM has exactly one VirtualBox process, headless (`VBoxHeadless`) or windowed
   (`VirtualBoxVM`). `VBoxManage startvm k8s-cp1` on a running node therefore fails with
   "already locked by a session"; that is normal, use **Show** instead.
 - To see what a headless VM's screen shows without opening a window:
   `VBoxManage controlvm k8s-cp1 screenshotpng cp1.png`.
 - The screen is fixed at 1280x800 (VirtualBox's ARM64 display cannot resize).
-- The desktop never locks; there is no screensaver password to remember.
+- The desktop never locks or blanks; there is no screensaver password to remember.
+- **Copy and paste with the Mac** works in both directions, but the keys differ inside the
+  window. Left ⌘ is VirtualBox's *host key* (the badge at the bottom right says so), so
+  ⌘C/⌘V never reach Ubuntu. Use **Ctrl+V** to paste in Firefox and other apps and
+  **Ctrl+Shift+V** (or right-click, Paste) in the terminal; copy with Ctrl+C / Ctrl+Shift+C
+  and then ⌘V on the Mac. If a paste does nothing, click inside the window first so it has
+  focus. `wl-paste` in a VM terminal prints whatever is on the Mac clipboard, which is the
+  quickest check that the link itself is fine. (The session is Wayland; GNOME 50 on 26.04
+  has no Xorg session. Guest Additions' clipboard service attaches to XWayland and GNOME
+  bridges it to Wayland apps.)
 - `w1` and `w2` have a text console only: log in as `vagrant` / `vagrant` (the banner
   says so; press Enter if boot messages have scrolled over the prompt, and note the
   password does not echo as you type). `vagrant ssh <node>` is the everyday way in.
@@ -66,9 +82,9 @@ app is at `http://192.168.56.11:30080/docs`.
 | Variable | Default | Effect |
 |----------|---------|--------|
 | `K8S_DESKTOP` | `cp1` | Node that gets the desktop, 4 GB RAM and 4 CPUs. `""` for none. |
-| `K8S_CONSOLE_KERNEL` | `1` on arm64, `0` otherwise | Install Ubuntu's HWE kernel so the VM console window shows output (one reboot per node during `make up`). Required for the desktop on arm64. |
-| `K8S_BOX` | by host arch | Override the Vagrant box. |
-| `K8S_GUI` | unset (headless) | `1` opens the VirtualBox window for the desktop node at boot, `all` for every node, `cp1,w1` for a list. A running headless node's window opens from the VirtualBox Manager (select it, Show). |
+| `K8S_BOX` | `bento/ubuntu-26.04` | Override the Vagrant box (Ubuntu 26.04 LTS; the same box serves amd64 and arm64 hosts). |
+| `VBOX_APP` | `1` | `make up` opens the VirtualBox Manager first (macOS `open -a VirtualBox`; Linux when a display is present). `0` skips it. |
+| `K8S_GUI` | `1` (desktop node windowed) | `0` boots every node headless, `all` opens a window for every node, `cp1,w1` for a list. A running headless node's window opens from the VirtualBox Manager (select it, Show). |
 
 ## The web edge
 `web` is a plain VM outside Kubernetes running nginx, the way a load balancer or bastion
@@ -103,7 +119,26 @@ http://192.168.56.20/                same site through the edge VM
 3. `kubectl -n devapp rollout restart deployment/api` (or `deployment/web`)
 
 The Postgres `notes` table persists across API restarts via the PVC.
-`make clean` tears everything down.
+Nothing in the loop needs a VM restart: `kubectl apply`, `make storage`, `make image` and
+`make deploy` all act on the running cluster. `make down` halts the VMs and keeps their
+state; `make up` brings the cluster and its pods back as they were. Only `make clean`
+tears everything down.
+
+## Your first pod by hand
+The app's pods come from Deployments in `k8s/`. To see the smallest unit on its own,
+create one pod directly (no `make image` needed; it uses a public image):
+
+```bash
+export KUBECONFIG="$PWD/kubeconfig"
+kubectl run hello --image=nginxinc/nginx-unprivileged:alpine --port=8080
+kubectl get pod hello -o wide          # Pending → ContainerCreating → Running, and which node
+kubectl describe pod hello | tail -8   # events: scheduled, pulled, started
+kubectl port-forward pod/hello 8080:8080   # then, in another terminal: curl -s localhost:8080
+kubectl delete pod hello               # gone for good: nothing recreates a bare pod
+```
+
+That last line is why the manifests use Deployments. [docs/learn.md](docs/learn.md)
+walks through the same thing with a full manifest and explains each field.
 
 ## API
 | Method | Path      | Purpose                     |
@@ -119,19 +154,48 @@ Swagger UI: `http://192.168.56.11:30080/docs`
 ```
 Vagrantfile                VM + node definitions (edit NODES to resize), desktop/console switches
 scripts/common.sh          containerd, kubeadm, kubelet on every node
-scripts/console-kernel.sh  arm64: HWE kernel + rebuilt Guest Additions so the console works
 scripts/control-plane.sh   kubeadm init, Flannel, writes kubeconfig + join.sh (idempotent)
 scripts/worker.sh          waits for join.sh, joins the cluster (idempotent)
 scripts/web.sh             web role: nginx edge proxy to the API NodePorts (+ self-signed TLS)
 scripts/console-banner.sh  every VM: login banner with credentials, quiet tty
-scripts/desktop.sh         XFCE + Firefox + auto-login on the desktop node
+scripts/desktop.sh         stock Ubuntu (GNOME) desktop + Firefox + auto-login on the desktop node
 scripts/load-image.sh      build api + web images on host → import into workers (no registry)
+scripts/gatekeeper.sh      install OPA Gatekeeper (pinned) and apply policy/ (make policy; `uninstall` removes it)
 app/                       FastAPI service + Dockerfile
 web/                       static site + nginx proxy config + Dockerfile
 k8s/                       Namespace, Postgres StatefulSet, API Deployment + NodePort, web Deployment + NodePort
 docs/learn.md              Learning guide: concepts, walkthrough, exercises
+policy/                    Gatekeeper ConstraintTemplates (Rego) and Constraints for the lab's security posture
 security/                  Security test routines (make sectest); see security/README.md
 ```
+
+## Policy (OPA Gatekeeper)
+`make policy` installs [OPA Gatekeeper](https://github.com/open-policy-agent/gatekeeper)
+(pinned release manifest, one controller replica to fit a 2 GB worker) and applies the
+lab's own rules from `policy/`:
+
+| Constraint | Action | Rule |
+|------------|--------|------|
+| `no-privilege` | deny | no `privileged` containers, no `hostPID`/`hostIPC`/`hostNetwork`, no `hostPath` volumes |
+| `non-root` | warn | every container sets `runAsNonRoot: true` and `allowPrivilegeEscalation: false` |
+| `resource-limits` | warn | every container has cpu and memory limits |
+
+They match Pods and the workloads that create them (Deployment, StatefulSet, DaemonSet,
+Job) in `devapp` and any `sec-*` namespace, so `default` stays a sandbox. `warn` is
+deliberate: `k8s/10-postgres.yaml` has no securityContext and no limits, so `deny` would
+break `make deploy`. Instead the violations print on every apply and in the audit:
+
+```bash
+kubectl apply -f k8s/10-postgres.yaml        # Warning: [non-root] ... [resource-limits] ...
+kubectl get constraints -o wide              # TOTAL-VIOLATIONS per constraint (audit, every 60 s)
+kubectl get k8slabnonroot non-root -o yaml | grep -A12 violations:
+kubectl -n devapp apply -f security/policies/privileged-pod.yaml   # denied by no-privilege
+```
+
+The Rego in `policy/templates/` is short and commented; `policy/constraints/` sets the
+scope and the action. Fix postgres, flip the two constraints to `deny`, and re-run
+`make sectest ROUTINE=10` to see the gate close. Remove everything with
+`./scripts/gatekeeper.sh uninstall`.
 
 ## Security testing
 ```bash
@@ -148,13 +212,21 @@ each finding and how to fix it. Only ever point these at your own cluster.
 - kubelet is pinned to `--node-ip` on the host-only NIC; VirtualBox's NAT interface gives
   every VM the same 10.0.2.15 address, which breaks pod networking otherwise.
 - Flannel is likewise pinned via `--iface` to the interface that owns the node IP
-  (`enp0s8` on `ubuntu/jammy64`, `eth1` on `bento/ubuntu-22.04`), resolved during
+  (`eth1`: the bento box boots with `net.ifnames=0`), resolved during
   provisioning. If every node's `flannel.alpha.coreos.com/public-ip` annotation reads
   10.0.2.15, the pin is missing and cross-node pod traffic (including DNS) fails.
 - Credentials in `k8s/10-postgres.yaml` are dev-only. For anything shared, move them
   to a sealed secret or external secrets store.
+- `kubectl get pods` prints "No resources found in default namespace" even though the app
+  is running: the app lives in the `devapp` namespace. Use `-n devapp`, `-A` for every
+  namespace, or make it the default with
+  `kubectl config set-context --current --namespace=devapp`.
+- A worker missing from `kubectl get nodes` while its VM is running never joined (its
+  kubelet has no `/etc/kubernetes/kubelet.conf`, typically because the control plane was
+  re-initialised after the worker was provisioned). `vagrant provision <name> --provision-with worker`
+  joins it live; no reboot.
 - To add a worker, append to `NODES` in the Vagrantfile and run `vagrant up <name>`.
-- On arm64, a full `vagrant provision` reboots each node (console-kernel step). Provisioners are
-  named, so re-run one step without the reboot: `vagrant provision cp1 --provision-with control-plane`
-  (others: `hosts`, `console-kernel`, `common`, `worker`, `desktop`).
+- Provisioners are named, so one step can be re-run on its own:
+  `vagrant provision cp1 --provision-with control-plane`
+  (others: `hosts`, `banner`, `common`, `worker`, `web`, `desktop`).
 - Troubleshooting table: see [CLAUDE.md](CLAUDE.md).

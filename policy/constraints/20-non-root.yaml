@@ -1,0 +1,18 @@
+# warn, not deny: k8s/10-postgres.yaml has no securityContext yet, and denying it would
+# break `make deploy`. The violation still shows on apply and in the audit; switch to
+# deny once the StatefulSet is fixed (exercise in docs/learn.md).
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sLabNonRoot
+metadata:
+  name: non-root
+spec:
+  enforcementAction: warn
+  match:
+    namespaces: ["devapp", "sec-*"]
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+      - apiGroups: ["apps"]
+        kinds: ["Deployment", "StatefulSet", "DaemonSet"]
+      - apiGroups: ["batch"]
+        kinds: ["Job"]
