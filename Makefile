@@ -12,6 +12,8 @@ SNAP ?= base
 NET_PREFIX := $(shell sed -nE 's/^NET_PREFIX *= *"([^"]+)".*/\1/p' Vagrantfile)
 WORKER_IP  := $(NET_PREFIX).$(shell grep -m1 'role: "worker"' Vagrantfile | sed -E 's/.*NET_PREFIX\}\.([0-9]+)".*/\1/')
 EDGE_IP    := $(NET_PREFIX).$(shell grep -m1 'role: "web"' Vagrantfile | sed -E 's/.*NET_PREFIX\}\.([0-9]+)".*/\1/')
+# Cluster members according to the Vagrantfile; `status` warns when the cluster has fewer
+CLUSTER_NODES := $(shell grep -cE 'role: "(control-plane|worker)"' Vagrantfile)
 
 .PHONY: all up vbox down storage image deploy policy policy-test check status logs test sectest snapshot restore clean
 
@@ -57,6 +59,8 @@ check:         ## Lint: shellcheck, yamllint, kubeconform on the manifests, doc 
 
 status:
 	$(KUBECTL) get nodes -o wide
+	@n=$$($(KUBECTL) get nodes --no-headers 2>/dev/null | wc -l | tr -d ' '); \
+	  [ "$$n" -ge $(CLUSTER_NODES) ] || echo "WARNING: $$n of $(CLUSTER_NODES) cluster nodes present; rejoin with: vagrant provision <node> --provision-with worker"
 	$(KUBECTL) -n devapp get pods,svc,pvc
 	@$(KUBECTL) get constraints -o wide 2>/dev/null || true
 

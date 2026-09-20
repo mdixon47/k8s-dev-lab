@@ -205,8 +205,9 @@ security/                  Security test routines (make sectest); see security/R
 
 ## Policy (OPA Gatekeeper)
 `make policy` installs [OPA Gatekeeper](https://github.com/open-policy-agent/gatekeeper)
-(pinned release manifest, one controller replica to fit a 2 GB worker) and applies the
-lab's own rules from `policy/`:
+(pinned release manifest with the controller set to one replica so it fits a 2 GB worker;
+re-running `make policy` restores that if it was scaled up) and applies the lab's own
+rules from `policy/`:
 
 | Constraint | Action | Rule |
 |------------|--------|------|

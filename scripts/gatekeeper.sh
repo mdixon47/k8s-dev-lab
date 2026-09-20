@@ -16,9 +16,17 @@ if [ "${1:-}" = "uninstall" ]; then
 fi
 
 echo "==> Gatekeeper ${GATEKEEPER_VERSION}"
-kubectl apply -f "$MANIFEST"
 # The release manifest runs 3 controller replicas at 512Mi each; a 2 GB lab worker cannot
-# host that next to the app, and one replica is plenty here.
+# host that next to the app, and one replica is plenty here. Patch the manifest rather
+# than scaling afterwards, so the applied (and last-applied) state says 1: a stray
+# `kubectl scale --replicas=3` is then undone by the next `make policy`, and the three
+# pods never exist even for a moment on a fresh install.
+GK_MANIFEST="$(mktemp)"
+curl -fsSL "$MANIFEST" | sed 's/^  replicas: 3$/  replicas: 1/' >"$GK_MANIFEST"
+[ "$(grep -c '^  replicas: 1$' "$GK_MANIFEST")" -ge 2 ] \
+  || { echo "ERROR: could not set the controller replicas in the Gatekeeper manifest; upstream format changed" >&2; exit 1; }
+kubectl apply -f "$GK_MANIFEST"
+rm -f "$GK_MANIFEST"
 kubectl -n gatekeeper-system scale deploy gatekeeper-controller-manager --replicas=1
 kubectl -n gatekeeper-system rollout status deploy/gatekeeper-controller-manager --timeout=300s
 kubectl -n gatekeeper-system rollout status deploy/gatekeeper-audit --timeout=300s
