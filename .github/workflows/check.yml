@@ -1,0 +1,17 @@
+# Static checks only: nothing here needs VirtualBox or a cluster.
+#   make check        shellcheck, yamllint, kubeconform, Markdown links (scripts/check.sh)
+#   make policy-test  gator verify on policy/tests/suite.yaml (scripts/policy-test.sh)
+# kubeconform and gator come from their Docker images (the scripts' fallback).
+name: check
+on:
+  push:
+  pull_request:
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck and yamllint
+        run: sudo apt-get update -q && sudo apt-get install -y -q shellcheck yamllint
+      - run: make check
+      - run: make policy-test
