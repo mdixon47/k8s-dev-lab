@@ -16,7 +16,7 @@ Host ──vagrant──▶ cp1  192.168.56.10  (control plane, Flannel CNI, Ubu
 - VirtualBox 7.x (7.1+ on Apple Silicon; the `bento/ubuntu-26.04` box ships amd64 and arm64 builds)
 - Vagrant 2.4+
 - Docker (to build the API and site images)
-- kubectl, make, curl
+- kubectl within one minor version of `K8S_VERSION` (Vagrantfile; kubectl's skew policy), make, curl
 - ~9 GB free RAM (~7 GB without the desktop), ~30 GB disk
 
 ## Quick start

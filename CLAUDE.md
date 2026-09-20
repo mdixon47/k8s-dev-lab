@@ -15,7 +15,7 @@ w2   192.168.56.12  worker
 web  192.168.56.20  edge (nginx reverse proxy; NOT a cluster member)
 ```
 
-Host requirements: VirtualBox 7.x (7.1+ on Apple Silicon), Vagrant 2.4+, Docker, kubectl, make, curl, ~9 GB free RAM (~7 GB with `K8S_DESKTOP=""`).
+Host requirements: VirtualBox 7.x (7.1+ on Apple Silicon), Vagrant 2.4+, Docker, kubectl (within one minor of `K8S_VERSION`), make, curl, ~9 GB free RAM (~7 GB with `K8S_DESKTOP=""`).
 
 ## Repository layout
 
