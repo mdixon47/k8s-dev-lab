@@ -1,0 +1,21 @@
+# Lesson 21: where the registry rule applies and how hard. Starts in warn: the lab's own
+# images (devapp/api:dev, devapp/web:dev, postgres:16-alpine) are not from cgr.dev, so
+# deny would block `make deploy`. Flip to deny once every workload uses an approved image.
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sLabApprovedRegistry
+metadata:
+  name: approved-registry
+spec:
+  enforcementAction: warn
+  match:
+    namespaces: ["devapp", "sec-*"]
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+      - apiGroups: ["apps"]
+        kinds: ["Deployment", "StatefulSet", "DaemonSet"]
+      - apiGroups: ["batch"]
+        kinds: ["Job"]
+  parameters:
+    allowedRegistries:
+      - cgr.dev/chainguard/

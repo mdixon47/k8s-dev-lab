@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run every routine (or one: ./run-all.sh 04). SKIP_SLOW=1 skips kube-bench and Trivy.
 set -uo pipefail
-cd "$(dirname "$0")"
+cd "$(dirname "$0")" || exit 1
 sel="${1:-}"
 results=()
 for f in [0-9][0-9]-*.sh; do

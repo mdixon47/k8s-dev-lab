@@ -7,7 +7,8 @@ FastAPI + Postgres app. This guide explains *why* each piece is there and gives
 exercises to try.
 
 Read alongside [README.md](../README.md) (quick start) and [CLAUDE.md](../CLAUDE.md)
-(conventions and troubleshooting).
+(conventions and troubleshooting). [course.md](course.md) turns the same material into a
+30-lesson course with a security capstone; this guide is its reference text.
 
 ---
 
@@ -16,7 +17,7 @@ Read alongside [README.md](../README.md) (quick start) and [CLAUDE.md](../CLAUDE
 ```
 ┌──────────────────────── host (macOS / Linux) ────────────────────────┐
 │  vagrant up ──▶ VirtualBox                                           │
-│  docker build ──▶ devapp/api:dev ──▶ ctr import (per worker)         │
+│  docker build ──▶ devapp/api:dev, devapp/web:dev ──▶ ctr import      │
 │  kubectl (KUBECONFIG=./kubeconfig) ──▶ https://192.168.56.10:6443    │
 │                                                                      │
 │   ┌──────── cp1 ────────┐  ┌──────── w1 ────────┐  ┌──── w2 ────┐    │
@@ -24,9 +25,12 @@ Read alongside [README.md](../README.md) (quick start) and [CLAUDE.md](../CLAUDE
 │   │ etcd, scheduler,    │  │ containerd         │  │ containerd │    │
 │   │ controller-manager  │  │ flannel, kube-proxy│  │ flannel    │    │
 │   │ kubelet, flannel    │  │ api pod  postgres  │  │ api pod    │    │
-│   │ GNOME desktop (opt.)│  │                    │  │            │    │
+│   │ GNOME desktop (opt.)│  │ web pod            │  │ web pod    │    │
 │   └─────────────────────┘  └────────────────────┘  └────────────┘    │
 │        192.168.56.10            192.168.56.11         192.168.56.12  │
+│                                                                      │
+│   web 192.168.56.20 (not a cluster node): nginx edge ──▶ NodePorts   │
+│   30081 (site) and 30080 (api) on w1 and w2                          │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -40,7 +44,8 @@ Layers, bottom to top:
 | Pod networking | Flannel (CNI) | applied in `control-plane.sh` |
 | Storage | local-path-provisioner | `make storage` |
 | Image distribution | docker save → ctr import | `scripts/load-image.sh` |
-| Application | FastAPI + Postgres | `app/`, `k8s/` |
+| Application | FastAPI + Postgres, nginx static site | `app/`, `web/`, `k8s/` |
+| Edge (outside the cluster) | nginx reverse proxy VM | `scripts/web.sh` |
 | Console & desktop (optional) | Guest Additions, Ubuntu (GNOME) desktop | `scripts/desktop.sh` |
 | Admission policy (optional) | OPA Gatekeeper, ConstraintTemplates, Constraints | `scripts/gatekeeper.sh`, `policy/` |
 
@@ -101,7 +106,9 @@ Runs identically on all three nodes. Each block answers a kubeadm preflight chec
 3. Produces `admin.conf`, copied to `/vagrant/kubeconfig` for the host.
 
 Flannel is then applied with `--iface` set to the host-only interface (resolved from
-`NODE_IP`). Until a CNI is running, every node stays `NotReady`. That is expected.
+`NODE_IP`). The manifest is fetched from the release tag in `FLANNEL_VERSION` (Vagrantfile)
+rather than `master`, so two clones a month apart get the same CNI. Until a CNI is running,
+every node stays `NotReady`. That is expected.
 
 The `--iface` flag is injected into the upstream manifest with `sed`, and the script refuses
 to apply the manifest if the flag did not land. That guard exists because upstream once
@@ -253,7 +260,7 @@ real cluster: `dryrun` → `warn` → fix the offenders → `deny`.
 
 ```bash
 kubectl get constraints -o wide                     # ENFORCEMENT-ACTION, TOTAL-VIOLATIONS
-kubectl -n devapp apply -f security/policies/privileged-pod.yaml   # denied, five reasons listed
+kubectl -n devapp apply -f security/policies/privileged-pod.yaml   # denied: four [no-privilege] reasons (+ [non-root] warnings)
 kubectl apply -f security/policies/privileged-pod.yaml             # default namespace: admitted!
 kubectl delete pod sec-test-privileged
 kubectl get k8slabnonroot non-root -o jsonpath='{.status.violations}' | jq .
@@ -262,6 +269,23 @@ kubectl get k8slabnonroot non-root -o jsonpath='{.status.violations}' | jq .
 Read `policy/templates/10-no-privilege.yaml`: each `violation[...]` block is one rule, and
 `pod_spec` picks `spec` or `spec.template.spec` depending on the kind, which is why applying
 the StatefulSet itself warns, not only the pod it creates.
+
+**Testing Rego without a cluster.** `make policy-test` runs `policy/tests/suite.yaml` through
+Gatekeeper's `gator verify`: each template and constraint pair is evaluated against fixture
+objects (the privileged pod, the lab's own workloads extracted from `k8s/`, a pod that sets
+`runAsNonRoot` at pod level) and the suite asserts the exact number of violations, with
+optional message matching. It is the fast loop for policy work: change a template, run the
+suite in a second, and only then `make policy`. The counts in the suite are also the answer
+key for several exercises below (postgres: 2 non-root and 2 resource-limits violations).
+
+**A fourth policy, worked.** `policy/examples/` holds an approved-registry template and
+constraint (`K8sLabApprovedRegistry`, parameter `allowedRegistries`, `warn`, same namespaces)
+plus an approved (`cgr.dev/chainguard/nginx`) and an unapproved Deployment to test it. It is
+the reference solution for lessons 19–23 of [course.md](course.md), and the first template
+here that takes parameters. `make policy` does not apply it; follow
+[policy/examples/README.md](../policy/examples/README.md), and remove it with
+`kubectl delete -f policy/examples/`. The approved image is distroless, so `kubectl exec`
+into it finds no shell.
 
 ---
 
@@ -322,16 +346,17 @@ pods alive and replaces any that die. Compare its `template:` block with the man
 Now deploy the app:
 
 ```bash
-make deploy                   # deliberately BEFORE storage
+make deploy                   # deliberately BEFORE storage; the postgres rollout wait
+                              # fails after ROLLOUT_TIMEOUT (180 s), which is the point
 kubectl -n devapp get pvc     # Pending
 kubectl -n devapp describe pvc postgres-data | tail -5   # "no storage class"
 make storage
 kubectl -n devapp get pvc -w  # flips to Bound
 
-kubectl -n devapp get pods    # api pods: ErrImageNeverPull or ImagePullBackOff
+kubectl -n devapp get pods    # api and web pods: ErrImageNeverPull or ImagePullBackOff
 make image
-kubectl -n devapp rollout restart deployment/api
-kubectl -n devapp get pods -w # api pods reach Running, READY 1/1 once /readyz passes
+kubectl -n devapp rollout restart deployment/api deployment/web
+kubectl -n devapp get pods -w # api and web pods reach Running; api is READY 1/1 once /readyz passes
 kubectl config set-context --current --namespace=devapp   # optional: stop typing -n devapp
 
 make test
@@ -363,7 +388,8 @@ select `k8s-cp1`, click **Show**). In the Ubuntu desktop:
 ## 4. Exercises
 
 Each exercise is designed to break something you can then diagnose with the
-troubleshooting table in `CLAUDE.md`.
+troubleshooting table in `CLAUDE.md`. Take `make snapshot` first; `make restore` then
+undoes any of them in about a minute, VMs and cluster state included.
 
 1. **Persistence.** POST a note, `kubectl -n devapp delete pod postgres-0`, wait, GET notes.
    The note is still there. Then delete the PVC and pod together and confirm it is gone.
@@ -423,13 +449,21 @@ troubleshooting table in `CLAUDE.md`.
     warns: the cert is self-signed. Replace it with one from a local CA you create with openssl.
 19. **Close the gate.** Give `k8s/10-postgres.yaml` a pod `securityContext` (`runAsUser: 70`,
     `runAsGroup: 70`, `fsGroup: 70`, `runAsNonRoot: true`), `allowPrivilegeEscalation: false`
-    and cpu/memory limits on the container. `make deploy`, wait for
+    and cpu/memory limits on the container, plus `env: [{name: PGDATA, value: /var/lib/postgresql/data/pgdata}]`.
+    Without that last one Postgres crash-loops: local-path creates the volume directory as
+    root, `fsGroup` does not apply to hostPath volumes, and `initdb` as uid 70 cannot chmod
+    it; a subdirectory it creates itself works. (Existing data at the volume root is left
+    behind; the lab's notes are disposable.) `make deploy`, wait for
     `kubectl get constraints -o wide` to show 0 violations, then change `enforcementAction`
     to `deny` in `policy/constraints/20-non-root.yaml` and `30-resource-limits.yaml`,
     `kubectl apply -f policy/constraints/`, and re-run `make sectest ROUTINE=10`.
 20. **Write a constraint.** Add a template that rejects images without a tag or with
     `:latest` (hint: `endswith(c.image, ":latest")` and `not contains(c.image, ":")`), a
-    `warn` constraint for it, and apply both. Which of the lab's images trips it?
+    `warn` constraint for it, and a test for each in `policy/tests/suite.yaml` before you
+    apply them (`make policy-test`). Which of the lab's images trips it? (Mind
+    digests: `image@sha256:...` has a colon but no tag.) `policy/examples/registry-template.yaml`
+    is a worked template to model it on, and its approved Deployment uses `:latest`, so the two
+    policies disagree about it; course lesson 28 picks that up.
 21. **Kill the gatekeeper.** `kubectl -n gatekeeper-system scale deploy gatekeeper-controller-manager --replicas=0`,
     apply the privileged pod in `devapp`, and explain why it went through
     (`kubectl get validatingwebhookconfiguration gatekeeper-validating-webhook-configuration -o yaml | grep failurePolicy`).
@@ -451,7 +485,8 @@ You have understood the lab when you can answer these without looking:
 - Nodes are Ready and Flannel pods are Running, but pods cannot resolve DNS across nodes.
   What single `kubectl` command exposes the cause?
 - Why can `vagrant provision` be re-run on a live cluster, and which two files make that decision?
-- Why does the VM console show only EFI messages on the stock kernel while SSH works fine?
+- Why did the VM console show only EFI messages on Ubuntu 22.04's stock kernel while SSH
+  worked fine, and what does the 26.04 kernel have that fixes it?
 - What breaks when you change a VM's kernel, and why does `/vagrant` depend on it?
 - Why does `VBoxManage startvm` on a running node say "already locked", and why does
   `make up` open no window when the VMs are already up?
@@ -463,6 +498,8 @@ You have understood the lab when you can answer these without looking:
   that was created before the constraint existed? What can?
 - What is the difference between a ConstraintTemplate and a Constraint, and why does the lab
   ship two of its constraints as `warn` rather than `deny`?
+- Why does Postgres crash-loop as uid 70 on a local-path volume until `PGDATA` points at a
+  subdirectory, and why does `fsGroup` not help?
 
 ---
 

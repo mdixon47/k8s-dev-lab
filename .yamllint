@@ -1,0 +1,6 @@
+# Rules for `make check` (scripts/check.sh). Catches syntax, duplicate keys, bad indentation;
+# the manifests carry long explanatory comments on purpose, so line length is off.
+extends: relaxed
+rules:
+  line-length: disable
+  colons: disable   # `requests:`/`limits:` are column-aligned in the manifests

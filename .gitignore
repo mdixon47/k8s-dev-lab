@@ -5,3 +5,4 @@ join.sh
 *.log
 __pycache__/
 *.pyc
+policy/tests/fixtures/lab/

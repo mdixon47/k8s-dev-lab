@@ -1,0 +1,17 @@
+# runAsNonRoot set once on the pod, not per container: K8sLabNonRoot must accept that
+# (the container still needs its own allowPrivilegeEscalation: false, which has no pod-level form).
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-level-nonroot
+  namespace: devapp
+spec:
+  securityContext:
+    runAsNonRoot: true
+  containers:
+    - name: web
+      image: nginxinc/nginx-unprivileged:alpine
+      resources:
+        limits: { cpu: 200m, memory: 64Mi }
+      securityContext:
+        allowPrivilegeEscalation: false

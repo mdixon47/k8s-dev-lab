@@ -1,0 +1,25 @@
+# Lesson 22, the negative test. Complies with every other lab constraint (non-root, no
+# privilege escalation, limits) so the only finding is the registry.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: unapproved
+  namespace: devapp
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: unapproved }
+  template:
+    metadata:
+      labels: { app: unapproved }
+    spec:
+      containers:
+        - name: web
+          image: docker.io/nginxinc/nginx-unprivileged:alpine
+          ports: [{ containerPort: 8080 }]
+          resources:
+            requests: { cpu: 50m, memory: 32Mi }
+            limits:   { cpu: 200m, memory: 64Mi }
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false

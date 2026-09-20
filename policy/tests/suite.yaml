@@ -1,0 +1,100 @@
+# Unit tests for the Rego in policy/templates/ (and policy/examples/), run by `make policy-test`
+# through `gator verify`. No cluster needed: gator evaluates each template + constraint pair
+# against the objects listed here and checks the number of violations. Paths are relative
+# to this file. Match rules apply, so fixtures live in `devapp` like the real workloads.
+#
+# The lab's own workloads are fixtures too (scripts/policy-test.sh extracts them from k8s/
+# into fixtures/lab/ on every run), so a change to k8s/ that breaks or fixes the posture
+# shows up here before it reaches the cluster.
+kind: Suite
+apiVersion: test.gatekeeper.sh/v1alpha1
+tests:
+  - name: no-privilege
+    template: ../templates/10-no-privilege.yaml
+    constraint: ../constraints/10-no-privilege.yaml
+    cases:
+      - name: privileged-pod
+        object: fixtures/privileged-pod.yaml
+        assertions:
+          - violations: 4          # privileged, hostPID, hostNetwork, hostPath
+          - violations: 1
+            message: is privileged
+          - violations: 1
+            message: mounts host path
+      - name: privileged-pod-in-default-namespace
+        object: fixtures/privileged-pod-default-ns.yaml
+        assertions:
+          - violations: no         # the constraint matches devapp and sec-* only
+      - name: web-deployment
+        object: fixtures/lab/web-deployment.yaml
+        assertions:
+          - violations: no
+      - name: postgres-statefulset
+        object: fixtures/lab/postgres-statefulset.yaml
+        assertions:
+          - violations: no
+
+  - name: non-root
+    template: ../templates/20-non-root.yaml
+    constraint: ../constraints/20-non-root.yaml
+    cases:
+      - name: privileged-pod
+        object: fixtures/privileged-pod.yaml
+        assertions:
+          - violations: 2          # runAsNonRoot missing, allowPrivilegeEscalation missing
+      - name: api-deployment
+        object: fixtures/lab/api-deployment.yaml
+        assertions:
+          - violations: no
+      - name: web-deployment
+        object: fixtures/lab/web-deployment.yaml
+        assertions:
+          - violations: no
+      - name: postgres-statefulset
+        object: fixtures/lab/postgres-statefulset.yaml
+        assertions:
+          - violations: 2          # the reason the constraint ships as warn (learn.md exercise 19)
+      - name: pod-level-runAsNonRoot
+        object: fixtures/pod-level-nonroot.yaml
+        assertions:
+          - violations: no         # pod securityContext counts unless the container overrides it
+
+  - name: resource-limits
+    template: ../templates/30-resource-limits.yaml
+    constraint: ../constraints/30-resource-limits.yaml
+    cases:
+      - name: privileged-pod
+        object: fixtures/privileged-pod.yaml
+        assertions:
+          - violations: 2          # no cpu limit, no memory limit
+      - name: api-deployment
+        object: fixtures/lab/api-deployment.yaml
+        assertions:
+          - violations: no
+      - name: web-deployment
+        object: fixtures/lab/web-deployment.yaml
+        assertions:
+          - violations: no
+      - name: postgres-statefulset
+        object: fixtures/lab/postgres-statefulset.yaml
+        assertions:
+          - violations: 2
+
+  # Course reference solution (policy/examples/, lessons 19-23), not applied by make policy
+  - name: approved-registry
+    template: ../examples/registry-template.yaml
+    constraint: ../examples/registry-constraint.yaml
+    cases:
+      - name: approved-deployment
+        object: ../examples/approved-deployment.yaml
+        assertions:
+          - violations: no
+      - name: unapproved-deployment
+        object: ../examples/unapproved-deployment.yaml
+        assertions:
+          - violations: 1
+            message: not from an approved registry
+      - name: lab-api-image
+        object: fixtures/lab/api-deployment.yaml
+        assertions:
+          - violations: 1          # devapp/api:dev is not from cgr.dev; why the example stays warn

@@ -15,7 +15,7 @@ Host ──vagrant──▶ cp1  192.168.56.10  (control plane, Flannel CNI, Ubu
 ## Prerequisites (host)
 - VirtualBox 7.x (7.1+ on Apple Silicon; the `bento/ubuntu-26.04` box ships amd64 and arm64 builds)
 - Vagrant 2.4+
-- Docker (to build the API image)
+- Docker (to build the API and site images)
 - kubectl, make, curl
 - ~9 GB free RAM (~7 GB without the desktop), ~30 GB disk
 
@@ -27,9 +27,21 @@ make image     # build devapp/api:dev and devapp/web:dev, import into each worke
 make deploy    # apply k8s/ manifests
 make test      # curl the API (30080), the site (30081), and the web edge
 make policy    # optional: OPA Gatekeeper + the lab's admission policy (policy/)
+make snapshot  # optional: VirtualBox snapshot of every VM, so make restore undoes any experiment
 ```
 
-`make all` runs those five steps in order and stops at the first failure.
+`make all` runs the first five in order and stops at the first failure; `make policy` and
+`make snapshot` stay separate, optional steps. Each rollout wait in `make deploy` gives up
+after `ROLLOUT_TIMEOUT` (180 s), so a missing StorageClass or image fails the step instead
+of hanging.
+
+Without VMs at all: `make check` lints the scripts and manifests (ShellCheck, yamllint,
+kubeconform, doc links) and `make policy-test` unit-tests the Gatekeeper policy with `gator`
+(Docker fallback for both when the tools are not installed).
+
+New to Kubernetes? [docs/course.md](docs/course.md) is a 30-lesson hands-on course built on
+this lab (foundations, then admission control with OPA Gatekeeper and a capstone);
+[docs/learn.md](docs/learn.md) explains each layer in depth.
 
 `kubectl` works from the host once the cluster is up:
 ```bash
@@ -42,8 +54,9 @@ and `kubeadm join` on nodes that are already part of the cluster.
 
 `make up` first launches the VirtualBox Manager and brings it to the front (`make vbox` does
 only that), so the `k8s-*` machines are visible as they boot and **Show** is one click away.
-The VMs themselves still start headless unless `K8S_GUI` is set. `make up VBOX_APP=0` skips
-the app, for CI or an ssh session with no display.
+Only the desktop node (`cp1`) opens a window of its own; the other VMs start headless unless
+`K8S_GUI` says otherwise (table below). `make up VBOX_APP=0` skips the app, for CI or an ssh
+session with no display.
 
 ## Console and desktop
 `make up` boots `k8s-cp1` with its VirtualBox window open. You land in the stock Ubuntu
@@ -74,7 +87,7 @@ the sample app is at `http://192.168.56.11:30080/docs`.
   quickest check that the link itself is fine. (The session is Wayland; GNOME 50 on 26.04
   has no Xorg session. Guest Additions' clipboard service attaches to XWayland and GNOME
   bridges it to Wayland apps.)
-- `w1` and `w2` have a text console only: log in as `vagrant` / `vagrant` (the banner
+- `w1`, `w2` and `web` have a text console only: log in as `vagrant` / `vagrant` (the banner
   says so; press Enter if boot messages have scrolled over the prompt, and note the
   password does not echo as you type). `vagrant ssh <node>` is the everyday way in.
 - Tunables (environment variables read by the Vagrantfile):
@@ -124,6 +137,23 @@ Nothing in the loop needs a VM restart: `kubectl apply`, `make storage`, `make i
 state; `make up` brings the cluster and its pods back as they were. Only `make clean`
 tears everything down.
 
+## Snapshots
+Most exercises in [docs/learn.md](docs/learn.md) break something on purpose. Take a
+VirtualBox snapshot of the whole lab once it works, and roll back in a minute instead of
+re-provisioning for twenty:
+
+```bash
+make snapshot                 # saves "base" on every VM (running VMs are snapshotted live)
+make snapshot SNAP=pre-calico # any name; the same name is overwritten
+make restore                  # back to "base": VMs, cluster state and pods as they were
+make restore SNAP=pre-calico
+vagrant snapshot list
+```
+
+`kubeconfig` on the host stays valid across a restore (the cluster CA does not change). A
+restore rolls back the VMs' disks, so images loaded with `make image` after the snapshot are
+gone too; re-run it.
+
 ## Your first pod by hand
 The app's pods come from Deployments in `k8s/`. To see the smallest unit on its own,
 create one pod directly (no `make image` needed; it uses a public image):
@@ -161,11 +191,15 @@ scripts/console-banner.sh  every VM: login banner with credentials, quiet tty
 scripts/desktop.sh         stock Ubuntu (GNOME) desktop + Firefox + auto-login on the desktop node
 scripts/load-image.sh      build api + web images on host → import into workers (no registry)
 scripts/gatekeeper.sh      install OPA Gatekeeper (pinned) and apply policy/ (make policy; `uninstall` removes it)
+scripts/policy-test.sh     gator verify on policy/tests/suite.yaml, no cluster needed (make policy-test)
+scripts/check.sh           ShellCheck, yamllint, kubeconform, Markdown link check (make check)
 app/                       FastAPI service + Dockerfile
 web/                       static site + nginx proxy config + Dockerfile
 k8s/                       Namespace, Postgres StatefulSet, API Deployment + NodePort, web Deployment + NodePort
-docs/learn.md              Learning guide: concepts, walkthrough, exercises
 policy/                    Gatekeeper ConstraintTemplates (Rego) and Constraints for the lab's security posture
+policy/examples/           course solutions: approved-registry policy + approved/unapproved test deployments (not applied by make policy)
+policy/tests/              gator test suite + fixtures for every template (make policy-test)
+docs/                      learn.md (layer-by-layer guide), course.md (30-lesson course with capstone), issues.md (known gaps, status)
 security/                  Security test routines (make sectest); see security/README.md
 ```
 
@@ -193,14 +227,27 @@ kubectl -n devapp apply -f security/policies/privileged-pod.yaml   # denied by n
 ```
 
 The Rego in `policy/templates/` is short and commented; `policy/constraints/` sets the
-scope and the action. Fix postgres, flip the two constraints to `deny`, and re-run
-`make sectest ROUTINE=10` to see the gate close. Remove everything with
-`./scripts/gatekeeper.sh uninstall`.
+scope and the action. `make policy-test` runs `policy/tests/suite.yaml` through
+[gator](https://open-policy-agent.github.io/gatekeeper/website/docs/gator) without a
+cluster: every template against the privileged pod, the lab's own workloads (extracted from
+`k8s/` on each run) and a few edge cases, asserting the exact violation counts. Edit a
+template, run the suite, then `make policy` to apply it. Fix postgres (non-root securityContext, limits, and `PGDATA` moved to a
+subdirectory of the volume; exercise 19 in [docs/learn.md](docs/learn.md), lesson 18 in the
+course), flip the two constraints to `deny`, and re-run `make sectest ROUTINE=10` to see the
+gate close. Remove everything with `./scripts/gatekeeper.sh uninstall`.
+
+`policy/examples/` holds a fourth, worked policy that `make policy` does not apply: an
+approved-registry template and constraint (`K8sLabApprovedRegistry`, `warn`, allows
+`cgr.dev/chainguard/`) with one approved and one unapproved Deployment to test it. It is the
+reference solution for lessons 19–23 of [docs/course.md](docs/course.md); see
+[policy/examples/README.md](policy/examples/README.md). `kubectl delete -f policy/examples/`
+removes it.
 
 ## Security testing
 ```bash
 make sectest                 # all routines: pod specs, runtime probe, RBAC, NetworkPolicy,
-                             # secrets in etcd, Trivy, Pod Security Admission, kube-bench, exposure
+                             # secrets in etcd, Trivy, Pod Security Admission, kube-bench, exposure,
+                             # Gatekeeper (skips until make policy has run)
 make sectest ROUTINE=05      # just one
 SKIP_SLOW=1 make sectest     # without Trivy and kube-bench
 ```
@@ -213,7 +260,8 @@ each finding and how to fix it. Only ever point these at your own cluster.
   every VM the same 10.0.2.15 address, which breaks pod networking otherwise.
 - Flannel is likewise pinned via `--iface` to the interface that owns the node IP
   (`eth1`: the bento box boots with `net.ifnames=0`), resolved during
-  provisioning. If every node's `flannel.alpha.coreos.com/public-ip` annotation reads
+  provisioning. Its manifest comes from a release tag (`FLANNEL_VERSION` in the
+  Vagrantfile), not `master`, like every other component the lab installs. If every node's `flannel.alpha.coreos.com/public-ip` annotation reads
   10.0.2.15, the pin is missing and cross-node pod traffic (including DNS) fails.
 - Credentials in `k8s/10-postgres.yaml` are dev-only. For anything shared, move them
   to a sealed secret or external secrets store.
@@ -226,6 +274,10 @@ each finding and how to fix it. Only ever point these at your own cluster.
   re-initialised after the worker was provisioned). `vagrant provision <name> --provision-with worker`
   joins it live; no reboot.
 - To add a worker, append to `NODES` in the Vagrantfile and run `vagrant up <name>`.
+- `K8S_VERSION` (Vagrantfile) picks the pkgs.k8s.io minor. Changing it needs fresh VMs
+  (`make clean`, then `make all`): the packages are held on existing nodes, and a live
+  cluster is upgraded with `kubeadm upgrade`, not by reprovisioning.
+- Known gaps and unverified claims are tracked in [docs/issues.md](docs/issues.md).
 - Provisioners are named, so one step can be re-run on its own:
   `vagrant provision cp1 --provision-with control-plane`
   (others: `hosts`, `banner`, `common`, `worker`, `web`, `desktop`).

@@ -1,0 +1,46 @@
+# Lesson 20: only images from approved registries. The registry list is a parameter, so
+# the same template serves a constraint per environment. Parameters are validated by the
+# openAPIV3Schema below; a constraint with a typo in `allowedRegistries` is rejected.
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8slabapprovedregistry
+  annotations:
+    description: Every container image must start with one of the approved registry prefixes.
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sLabApprovedRegistry
+      validation:
+        openAPIV3Schema:
+          type: object
+          properties:
+            allowedRegistries:
+              type: array
+              description: Image prefixes that are allowed, e.g. cgr.dev/chainguard/
+              items:
+                type: string
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8slabapprovedregistry
+
+        pod_spec = s { input.review.kind.kind == "Pod"; s := input.review.object.spec }
+        pod_spec = s { input.review.kind.kind != "Pod"; s := input.review.object.spec.template.spec }
+
+        containers[c] { c := pod_spec.containers[_] }
+        containers[c] { c := pod_spec.initContainers[_] }
+        containers[c] { c := pod_spec.ephemeralContainers[_] }
+
+        approved(image) {
+          prefix := input.parameters.allowedRegistries[_]
+          startswith(image, prefix)
+        }
+
+        violation[{"msg": msg}] {
+          c := containers[_]
+          not approved(c.image)
+          msg := sprintf("container %q uses image %q, which is not from an approved registry %v",
+                         [c.name, c.image, input.parameters.allowedRegistries])
+        }

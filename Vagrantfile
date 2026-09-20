@@ -1,6 +1,10 @@
 # -*- mode: ruby -*-
 # Local Kubernetes dev lab: 1 control plane + 2 workers on VirtualBox (kubeadm)
-K8S_VERSION = "1.30"
+# Kubernetes minor (pkgs.k8s.io serves one repo per minor) and the Flannel release whose
+# manifest control-plane.sh applies. Changing K8S_VERSION needs fresh VMs (make clean):
+# common.sh holds the packages, and a live cluster is upgraded with kubeadm, not apt.
+K8S_VERSION     = "1.36"
+FLANNEL_VERSION = "v0.28.9"
 # Ubuntu 26.04 LTS (Resolute Raccoon). Canonical publishes no Vagrant box for 26.04, so every
 # host uses bento's, which ships VirtualBox builds for amd64 and arm64 (Apple Silicon needs
 # VirtualBox 7.1+). Its 7.0 kernel drives the VirtualBox console display out of the box, so
@@ -9,7 +13,7 @@ HOST_ARM64  = RUBY_PLATFORM.match?(/arm64|aarch64/)
 BOX         = ENV.fetch("K8S_BOX", "bento/ubuntu-26.04")
 NET_PREFIX  = "192.168.56"
 POD_CIDR    = "10.244.0.0/16"
-# Node that gets an XFCE desktop for learning/sandboxing (scripts/desktop.sh); it is sized up
+# Node that gets the Ubuntu (GNOME) desktop for learning/sandboxing (scripts/desktop.sh); it is sized up
 # to DESKTOP_MEM/DESKTOP_CPUS. Set K8S_DESKTOP="" for no desktop or name another node.
 DESKTOP_NODE = ENV.fetch("K8S_DESKTOP", "cp1")
 DESKTOP_MEM  = 4096
@@ -74,7 +78,7 @@ Vagrant.configure("2") do |config|
           env: { "K8S_VERSION" => K8S_VERSION, "NODE_IP" => node[:ip] }
         if node[:role] == "control-plane"
           vm.vm.provision "control-plane", type: "shell", path: "scripts/control-plane.sh",
-            env: { "NODE_IP" => node[:ip], "POD_CIDR" => POD_CIDR }
+            env: { "NODE_IP" => node[:ip], "POD_CIDR" => POD_CIDR, "FLANNEL_VERSION" => FLANNEL_VERSION }
         else
           vm.vm.provision "worker", type: "shell", path: "scripts/worker.sh"
         end

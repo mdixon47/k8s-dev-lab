@@ -38,17 +38,18 @@ and the kube-bench Jobs).
    `automountServiceAccountToken: false` to the API Deployment. Re-run `07` until it passes,
    then label the namespace with `enforce=restricted`.
 3. **Make admission policy bite.** After `make policy`, give `k8s/10-postgres.yaml` a
-   non-root securityContext (`runAsUser: 70`, `fsGroup: 70`, `allowPrivilegeEscalation: false`)
-   and limits, redeploy, wait for the audit count to reach 0, then change `enforcementAction`
+   non-root securityContext (`runAsUser: 70`, `fsGroup: 70`, `allowPrivilegeEscalation: false`),
+   limits, and `PGDATA=/var/lib/postgresql/data/pgdata` (initdb as uid 70 cannot fix the
+   permissions of the root-owned volume directory, but can create a subdirectory), redeploy, wait for the audit count to reach 0, then change `enforcementAction`
    to `deny` in `policy/constraints/` and re-run `10`.
 4. **Make NetworkPolicy real.** Replace Flannel with Calico, re-run `04`, and watch the deny
    policy start working. This is the single biggest security difference between CNIs.
-4. **Encrypt Secrets at rest.** Write an `EncryptionConfiguration`, add
+5. **Encrypt Secrets at rest.** Write an `EncryptionConfiguration`, add
    `--encryption-provider-config` to the kube-apiserver static pod manifest on cp1, and
    rewrite the secrets (`kubectl get secrets -A -o json | kubectl replace -f -`). Re-run `05`.
-5. **Close the LAN exposure.** Bind the scheduler and controller-manager to 127.0.0.1 in their
+6. **Close the LAN exposure.** Bind the scheduler and controller-manager to 127.0.0.1 in their
    static pod manifests and add `ufw` rules on the nodes for 2379/2380. Re-run `09`.
-6. **Fix a kube-bench item** from the `08` report and re-run it.
+7. **Fix a kube-bench item** from the `08` report and re-run it.
 
 Everything here targets your own lab VMs. The same probes against a cluster you do not
 own are an attack, not a test.

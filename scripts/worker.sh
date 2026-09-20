@@ -8,7 +8,7 @@ if [ -f /etc/kubernetes/kubelet.conf ]; then
   exit 0
 fi
 
-for i in $(seq 1 30); do
+for _ in $(seq 1 30); do
   [ -f /vagrant/join.sh ] && break
   echo "Waiting for join.sh..."; sleep 10
 done
