@@ -124,7 +124,9 @@ Without that check, kubeadm's preflight fails with "Port 6443 is in use" and
 "/var/lib/etcd is not empty", which is kubeadm telling you the node is already initialized.
 
 Finally `kubeadm token create --print-join-command` writes `join.sh`. Workers poll for
-that file (up to five minutes) and run it. Join tokens expire after 24 hours; if you add a
+that file (up to five minutes), wait for the API server it names to answer, and run it,
+retrying up to three times: a control plane that reboots mid-join (a "Power off" from its
+window) once left a worker out of the cluster for days because nothing tried again. Join tokens expire after 24 hours; if you add a
 worker much later, regenerate one with `vagrant ssh cp1 -c "sudo kubeadm token create --print-join-command"`.
 
 **Try it:** inside cp1, `ls /etc/kubernetes/manifests` and `kubectl -n kube-system get pods -o wide`.

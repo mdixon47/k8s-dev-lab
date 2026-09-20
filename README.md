@@ -185,7 +185,7 @@ Swagger UI: `http://192.168.56.11:30080/docs`
 Vagrantfile                VM + node definitions (edit NODES to resize), desktop/console switches
 scripts/common.sh          containerd, kubeadm, kubelet on every node
 scripts/control-plane.sh   kubeadm init, Flannel, writes kubeconfig + join.sh (idempotent)
-scripts/worker.sh          waits for join.sh, joins the cluster (idempotent)
+scripts/worker.sh          waits for join.sh and the API server, joins with retries (idempotent)
 scripts/web.sh             web role: nginx edge proxy to the API NodePorts (+ self-signed TLS)
 scripts/console-banner.sh  every VM: login banner with credentials, quiet tty
 scripts/desktop.sh         stock Ubuntu (GNOME) desktop + Firefox + auto-login on the desktop node
