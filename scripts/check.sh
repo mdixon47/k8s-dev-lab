@@ -38,6 +38,7 @@ elif command -v docker >/dev/null 2>&1; then
   # Docker Desktop mounts shared paths only; this checkout may sit outside them
   WORK="$(mktemp -d)"
   cp -R k8s policy security "$WORK"/
+  chmod -R a+rX "$WORK"   # mktemp -d is 0700 on Linux; the image may run as non-root
   docker run --rm -v "$WORK":/w -w /w "ghcr.io/yannh/kubeconform:${KUBECONFORM_VERSION}" \
     "${kc_args[@]}" k8s policy/examples policy/tests/fixtures security/policies || fail "kubeconform"
   rm -rf "$WORK"

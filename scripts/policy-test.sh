@@ -40,5 +40,7 @@ else
   WORK="$(mktemp -d)"
   trap 'rm -rf "$WORK"' EXIT
   cp -R "$ROOT/policy" "$ROOT/k8s" "$WORK"/
+  # mktemp -d is 0700 on Linux and the gator image runs as a non-root user
+  chmod -R a+rX "$WORK"
   docker run --rm -v "$WORK":/w -w /w "openpolicyagent/gator:${GATOR_VERSION}" verify "$SUITE"
 fi
