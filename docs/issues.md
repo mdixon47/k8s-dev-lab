@@ -24,6 +24,16 @@ lab), **future** (deliberately not done), **resolved**.
 | 1.8 | resolved 2026-09-20 | **The `/swap.img` fstab line.** Confirmed on w1: `#/swap.img<tab>none<tab>swap<tab>sw<tab>0<tab>0`. The exercise text is right. |
 | 1.9 | open | **Course commands after the 2026-09-20 changes.** `docs/course.md` claims every command was verified. Lesson 9's `make deploy` now fails on the timeout instead of hanging (text updated), and lesson 12 gained a `make snapshot` note. Neither has been run through. |
 
+## 1b. Gateway training (2026-09-21)
+
+| # | Status | Item |
+|---|--------|------|
+| 1b.1 | unverified | **`make gateway` on Kubernetes 1.36.** Everything in `docs/gateway-course.md` was verified on the current 1.30.14 cluster, where the script strips TLSRoute's `isIP()` rule. On 1.36 that branch is skipped and the full standard-channel CRD set applies; run `make gateway` after the rebuild and re-check lesson 2's CRD count. |
+| 1b.2 | open | **Istio pinned to 1.30.5.** Istio 1.31.1 was released the day the course was written but its Helm charts were not in the index yet (`chart "base" matching 1.31.1 not found`). Bump `ISTIO_VERSION` in the Makefile and `scripts/gateway.sh` once `helm search repo istio/base --versions` lists it, then re-run lessons 6 and 8. |
+| 1b.3 | open | **Lesson 3 exercise (MetalLB failover on `vagrant halt w1`)** is the one exercise in the course not run; it is marked as such in the text. |
+| 1b.4 | open | **Lesson 7's HTTPS listener is imperative** (`kubectl patch`), and `kubectl apply -f gateway/20-envoy-gateway.yaml` removes it; the lesson says so and makes adding it to the file the exercise. A `gateway/examples/https-listeners.yaml` would make it declarative but needs the Secret to exist first. |
+| 1b.5 | open | **Memory.** The stack requests ~1.2 GB (Envoy Gateway's controller 256Mi + proxy 512Mi, istiod 256Mi, Istio gateway 128Mi); w1/w2 reach 70–80 % of requests with the app and Gatekeeper. Envoy Gateway's proxy request could be lowered through an `EnvoyProxy` resource if a fourth workload is ever added. |
+
 ## 2. Open
 
 | # | Status | Item |

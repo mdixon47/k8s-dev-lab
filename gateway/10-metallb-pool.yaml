@@ -1,0 +1,20 @@
+# MetalLB in layer-2 mode hands LoadBalancer Services an address from this pool on the
+# host-only network and answers ARP for it from whichever node holds it. Without a
+# LoadBalancer implementation every Gateway's Service sits at EXTERNAL-IP <pending>.
+# .100-.110 is outside the range the Vagrantfile uses (.10-.20).
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: lab
+  namespace: metallb-system
+spec:
+  addresses:
+    - 192.168.56.100-192.168.56.110
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: lab
+  namespace: metallb-system
+spec:
+  ipAddressPools: [lab]

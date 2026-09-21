@@ -518,5 +518,8 @@ You have understood the lab when you can answer these without looking:
   NetworkPolicy, read a Secret straight out of etcd, scan images, test Pod Security Admission,
   run the CIS benchmark, map what the nodes expose on the LAN, and exercise Gatekeeper.
   Each finding is a hardening exercise.
+- Put a real ingress in front of the app: [gateway-course.md](gateway-course.md) installs
+  Envoy Gateway and Istio's ingress gateway side by side through the Gateway API (`make gateway`),
+  with MetalLB giving each a `192.168.56.x` address, and ends by pointing the `web` edge at them.
 - Port the Rego templates in `policy/` to Gatekeeper's CEL engine (`K8sNativeValidation`) or
   to a plain Kubernetes `ValidatingAdmissionPolicy`, which needs no webhook at all, and compare.

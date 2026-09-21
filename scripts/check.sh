@@ -25,7 +25,7 @@ fi
 
 step "yamllint"
 if command -v yamllint >/dev/null 2>&1; then
-  yamllint -s k8s policy security/policies || fail "yamllint"
+  yamllint -s k8s policy security/policies gateway || fail "yamllint"
 else
   skip "yamllint not installed (brew install yamllint)"
 fi
@@ -33,14 +33,14 @@ fi
 step "kubeconform"
 kc_args=(-strict -summary -ignore-missing-schemas)
 if command -v kubeconform >/dev/null 2>&1; then
-  kubeconform "${kc_args[@]}" k8s policy/examples policy/tests/fixtures security/policies || fail "kubeconform"
+  kubeconform "${kc_args[@]}" k8s policy/examples policy/tests/fixtures security/policies gateway gateway/examples || fail "kubeconform"
 elif command -v docker >/dev/null 2>&1; then
   # Docker Desktop mounts shared paths only; this checkout may sit outside them
   WORK="$(mktemp -d)"
-  cp -R k8s policy security "$WORK"/
+  cp -R k8s policy security gateway "$WORK"/
   chmod -R a+rX "$WORK"   # mktemp -d is 0700 on Linux; the image may run as non-root
   docker run --rm -v "$WORK":/w -w /w "ghcr.io/yannh/kubeconform:${KUBECONFORM_VERSION}" \
-    "${kc_args[@]}" k8s policy/examples policy/tests/fixtures security/policies || fail "kubeconform"
+    "${kc_args[@]}" k8s policy/examples policy/tests/fixtures security/policies gateway gateway/examples || fail "kubeconform"
   rm -rf "$WORK"
 else
   skip "neither kubeconform nor docker found"

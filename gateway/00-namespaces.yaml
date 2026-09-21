@@ -1,0 +1,28 @@
+# Namespaces for the gateway training, created before the Helm charts so they carry the
+# labels the lab expects. (A deny constraint on unlabelled Namespaces, such as the course's
+# K8sRequiredLabels exercise, would otherwise reject the charts' --create-namespace.)
+# `gateways` holds the Gateway objects: the cluster-operator side of the Gateway API role
+# split. Application teams own HTTPRoutes in their own namespaces (devapp).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: metallb-system
+  labels: { owner: lab }
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: envoy-gateway-system
+  labels: { owner: lab }
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: istio-system
+  labels: { owner: lab }
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gateways
+  labels: { owner: lab }

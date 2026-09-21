@@ -1,0 +1,21 @@
+# Istio ingress through the same API: the `istio` GatewayClass is created by istiod, and
+# istiod deploys the gateway (Deployment + Service named istio-<gateway>) into the
+# Gateway's own namespace. Compare with Envoy Gateway, which keeps its proxies in its own
+# namespace. Same listener, different address.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: istio
+  namespace: gateways
+spec:
+  gatewayClassName: istio
+  addresses:
+    - type: IPAddress
+      value: 192.168.56.101
+  listeners:
+    - name: http
+      port: 80
+      protocol: HTTP
+      allowedRoutes:
+        namespaces:
+          from: All

@@ -1,0 +1,19 @@
+# Istio extension (lesson 8): an AuthorizationPolicy attached to the istio Gateway that
+# denies /docs and /openapi.json at the edge (security routine 09 flags the public Swagger
+# UI). Only Istio understands this kind; Envoy Gateway keeps serving /docs.
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: no-docs-at-edge
+  namespace: gateways
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: istio
+  action: DENY
+  rules:
+    - to:
+        - operation:
+            ports: ["80", "443"]      # the listeners; without this Istio warns the rule would also cut raw TCP
+            paths: ["/docs", "/openapi.json"]

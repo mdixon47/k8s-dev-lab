@@ -1,0 +1,21 @@
+# Envoy Gateway extension (lesson 8): a local rate limit on the api HTTPRoute. Policy
+# attachment: the policy names the route it applies to with targetRefs, so the route's
+# owner never has to edit it. Only Envoy Gateway understands this kind; Istio serves the
+# same route without a limit.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: api-ratelimit
+  namespace: devapp
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: api
+  rateLimit:
+    type: Local
+    local:
+      rules:
+        - limit:
+            requests: 5
+            unit: Second

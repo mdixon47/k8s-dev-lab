@@ -4,6 +4,10 @@ KUBECTL     = KUBECONFIG="$(KUBECONFIG)" kubectl
 # make up VBOX_APP=0 leaves the VirtualBox Manager closed (CI, ssh sessions)
 VBOX_APP   ?= 1
 GATEKEEPER_VERSION ?= v3.23.1
+# make gateway: MetalLB + Envoy Gateway + Istio, pinned (scripts/gateway.sh)
+METALLB_VERSION       ?= 0.16.1
+ENVOY_GATEWAY_VERSION ?= v1.9.1
+ISTIO_VERSION         ?= 1.30.5
 # Rollout waits in `deploy`: without one a missing StorageClass or image blocks forever
 ROLLOUT_TIMEOUT ?= 180s
 # Name used by `snapshot` / `restore` (make snapshot SNAP=before-calico)
@@ -15,7 +19,7 @@ EDGE_IP    := $(NET_PREFIX).$(shell grep -m1 'role: "web"' Vagrantfile | sed -E 
 # Cluster members according to the Vagrantfile; `status` warns when the cluster has fewer
 CLUSTER_NODES := $(shell grep -cE 'role: "(control-plane|worker)"' Vagrantfile)
 
-.PHONY: all up vbox down storage image deploy policy policy-test check status logs test sectest snapshot restore clean
+.PHONY: all up vbox down storage image deploy policy policy-test gateway gateway-uninstall check status logs test sectest snapshot restore clean
 
 all: up storage image deploy test   ## Fresh clone to running app in one command
 
@@ -51,6 +55,12 @@ deploy:        ## Apply all manifests
 policy:        ## Install OPA Gatekeeper and the lab's constraints (policy/); GATEKEEPER_VERSION=vX.Y.Z to pin
 	KUBECONFIG="$(KUBECONFIG)" GATEKEEPER_VERSION="$(GATEKEEPER_VERSION)" ./scripts/gatekeeper.sh
 
+gateway:       ## MetalLB + Envoy Gateway + Istio via the Gateway API (docs/gateway-course.md); needs helm
+	KUBECONFIG="$(KUBECONFIG)" METALLB_VERSION="$(METALLB_VERSION)" ENVOY_GATEWAY_VERSION="$(ENVOY_GATEWAY_VERSION)" ISTIO_VERSION="$(ISTIO_VERSION)" ./scripts/gateway.sh
+
+gateway-uninstall: ## Remove the gateway stack
+	KUBECONFIG="$(KUBECONFIG)" ./scripts/gateway.sh uninstall
+
 policy-test:   ## Unit-test the Rego in policy/ with gator (no cluster needed; docker fallback)
 	./scripts/policy-test.sh
 
@@ -63,6 +73,7 @@ status:
 	  [ "$$n" -ge $(CLUSTER_NODES) ] || echo "WARNING: $$n of $(CLUSTER_NODES) cluster nodes present; rejoin with: vagrant provision <node> --provision-with worker"
 	$(KUBECTL) -n devapp get pods,svc,pvc
 	@$(KUBECTL) get constraints -o wide 2>/dev/null || true
+	@$(KUBECTL) get gateway -A 2>/dev/null || true
 
 logs:
 	$(KUBECTL) -n devapp logs -l app=api -f

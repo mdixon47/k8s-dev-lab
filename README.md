@@ -28,6 +28,7 @@ make deploy    # apply k8s/ manifests
 make test      # curl the API (30080), the site (30081), and the web edge
 make policy    # optional: OPA Gatekeeper + the lab's admission policy (policy/)
 make snapshot  # optional: VirtualBox snapshot of every VM, so make restore undoes any experiment
+make gateway   # optional: MetalLB + Envoy Gateway + Istio ingress via the Gateway API (docs/gateway-course.md)
 ```
 
 `make all` runs the first five in order and stops at the first failure; `make policy` and
@@ -42,6 +43,8 @@ kubeconform, doc links) and `make policy-test` unit-tests the Gatekeeper policy 
 New to Kubernetes? [docs/course.md](docs/course.md) is a 30-lesson hands-on course built on
 this lab (foundations, then admission control with OPA Gatekeeper and a capstone);
 [docs/learn.md](docs/learn.md) explains each layer in depth.
+[docs/gateway-course.md](docs/gateway-course.md) is a ten-lesson follow-on: the Kubernetes
+Gateway API with Envoy Gateway and Istio's ingress gateway side by side on the same routes.
 
 `kubectl` works from the host once the cluster is up:
 ```bash
@@ -191,6 +194,7 @@ scripts/console-banner.sh  every VM: login banner with credentials, quiet tty
 scripts/desktop.sh         stock Ubuntu (GNOME) desktop + Firefox + auto-login on the desktop node
 scripts/load-image.sh      build api + web images on host → import into workers (no registry)
 scripts/gatekeeper.sh      install OPA Gatekeeper (pinned) and apply policy/ (make policy; `uninstall` removes it)
+scripts/gateway.sh         MetalLB + Envoy Gateway + Istio (Helm, pinned) and gateway/ (make gateway; `uninstall` removes it)
 scripts/policy-test.sh     gator verify on policy/tests/suite.yaml, no cluster needed (make policy-test)
 scripts/check.sh           ShellCheck, yamllint, kubeconform, Markdown link check (make check)
 app/                       FastAPI service + Dockerfile
@@ -199,7 +203,8 @@ k8s/                       Namespace, Postgres StatefulSet, API Deployment + Nod
 policy/                    Gatekeeper ConstraintTemplates (Rego) and Constraints for the lab's security posture
 policy/examples/           course solutions: approved-registry policy + approved/unapproved test deployments (not applied by make policy)
 policy/tests/              gator test suite + fixtures for every template (make policy-test)
-docs/                      learn.md (layer-by-layer guide), course.md (30-lesson course with capstone), issues.md (known gaps, status)
+gateway/                   Gateway API objects: namespaces, MetalLB pool, one Gateway per implementation, HTTPRoutes; examples/ for the course
+docs/                      learn.md (layer-by-layer guide), course.md (30-lesson course), gateway-course.md (Envoy Gateway + Istio), issues.md (known gaps)
 security/                  Security test routines (make sectest); see security/README.md
 ```
 
@@ -243,6 +248,21 @@ approved-registry template and constraint (`K8sLabApprovedRegistry`, `warn`, all
 reference solution for lessons 19–23 of [docs/course.md](docs/course.md); see
 [policy/examples/README.md](policy/examples/README.md). `kubectl delete -f policy/examples/`
 removes it.
+
+## Gateways (Envoy Gateway and Istio)
+`make gateway` installs MetalLB (layer-2 addresses `192.168.56.100-110` on the host-only
+network), Envoy Gateway and Istio's control plane from pinned Helm charts, then one Gateway
+API `Gateway` per implementation and two `HTTPRoute`s in `devapp` that attach to both:
+
+```
+http://192.168.56.100/   Envoy Gateway     http://192.168.56.101/   Istio ingress gateway
+/api/… → api Service (prefix rewritten), /docs and /openapi.json → api, everything else → web
+```
+
+[docs/gateway-course.md](docs/gateway-course.md) walks through it in ten lessons (MetalLB,
+route attachment, TLS on both, a rate limit and an authorization policy, the Envoy admin
+APIs, failure drills, and pointing the `web` edge at the gateways). Needs `helm` and about
+1.2 GB of memory across the workers. `make gateway-uninstall` removes it.
 
 ## Security testing
 ```bash
