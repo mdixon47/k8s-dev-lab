@@ -2,14 +2,19 @@
 
 A reproducible local development environment: three Ubuntu 26.04 LTS VMs on VirtualBox
 form a real kubeadm cluster (1 control plane, 2 workers), and a FastAPI + Postgres
-sample app runs on it behind an nginx site, with a fourth VM acting as the edge. One node also gets the stock Ubuntu desktop (GNOME) and boots with its VirtualBox window
-open, so you can work inside the cluster from a VM window.
+sample app runs on it behind an nginx site, with a fourth VM acting as the edge. One node also
+gets the stock Ubuntu desktop (GNOME) and boots with its VirtualBox window open, so you can
+work inside the cluster from a VM window. Optional layers add OPA Gatekeeper admission policy
+(`make policy`) and two Gateway API ingress implementations, Envoy Gateway and Istio, side by
+side (`make gateway`). Two courses ([docs/course.md](docs/course.md),
+[docs/gateway-course.md](docs/gateway-course.md)) run on it, every command verified.
 
 ```
 Host ──vagrant──▶ cp1  192.168.56.10  (control plane, Flannel CNI, Ubuntu desktop)
                   w1   192.168.56.11  (worker)
                   w2   192.168.56.12  (worker)
                   web  192.168.56.20  (edge: nginx reverse proxy, not in the cluster)
+     make gateway ─▶   192.168.56.100 (Envoy Gateway)  192.168.56.101 (Istio)  via MetalLB
 ```
 
 ## Prerequisites (host)
@@ -18,6 +23,8 @@ Host ──vagrant──▶ cp1  192.168.56.10  (control plane, Flannel CNI, Ubu
 - Docker (to build the API and site images)
 - kubectl within one minor version of `K8S_VERSION` (Vagrantfile; kubectl's skew policy), make, curl
 - ~9 GB free RAM (~7 GB without the desktop), ~30 GB disk
+- Optional: `helm` for `make gateway`; `shellcheck` and `yamllint` for `make check` (kubeconform
+  and gator run from their Docker images when not installed)
 
 ## Quick start
 ```bash
@@ -102,6 +109,21 @@ the sample app is at `http://192.168.56.11:30080/docs`.
 | `VBOX_APP` | `1` | `make up` opens the VirtualBox Manager first (macOS `open -a VirtualBox`; Linux when a display is present). `0` skips it. |
 | `K8S_GUI` | `1` (desktop node windowed) | `0` boots every node headless, `all` opens a window for every node, `cp1,w1` for a list. A running headless node's window opens from the VirtualBox Manager (select it, Show). |
 
+Versions and knobs read by the Makefile (`make target VAR=value`):
+
+| Variable | Default | Used by |
+|----------|---------|---------|
+| `ROLLOUT_TIMEOUT` | `180s` | `make deploy`: each rollout wait fails after this instead of hanging |
+| `SNAP` | `base` | `make snapshot` / `make restore`: snapshot name |
+| `GATEKEEPER_VERSION` | `v3.23.1` | `make policy`, `make policy-test` (gator image) |
+| `METALLB_VERSION` | `0.16.1` | `make gateway` |
+| `ENVOY_GATEWAY_VERSION` | `v1.9.1` | `make gateway` (also the source of the Gateway API CRDs) |
+| `ISTIO_VERSION` | `1.30.5` | `make gateway` (charts lag GitHub releases by a few days) |
+| `KUBECONFORM_VERSION` | `v0.8.0` | `make check` (Docker fallback) |
+
+`K8S_VERSION` (`1.36`) and `FLANNEL_VERSION` (`v0.28.9`) live in the Vagrantfile; changing
+`K8S_VERSION` needs fresh VMs (`make clean && make all`).
+
 ## The web edge
 `web` is a plain VM outside Kubernetes running nginx, the way a load balancer or bastion
 sits in front of a real cluster. It proxies `/` to the site NodePort (30081) and `/api/...`
@@ -139,6 +161,13 @@ Nothing in the loop needs a VM restart: `kubectl apply`, `make storage`, `make i
 `make deploy` all act on the running cluster. `make down` halts the VMs and keeps their
 state; `make up` brings the cluster and its pods back as they were. Only `make clean`
 tears everything down.
+
+## Static checks (no VMs)
+```bash
+make check          # shellcheck, yamllint, kubeconform on k8s/ policy/ gateway/, Markdown links
+make policy-test    # gator verify: policy/tests/suite.yaml, 17 cases against the templates
+```
+Both run in CI on every push ([.github/workflows/check.yml](.github/workflows/check.yml)).
 
 ## Snapshots
 Most exercises in [docs/learn.md](docs/learn.md) break something on purpose. Take a
@@ -292,8 +321,10 @@ each finding and how to fix it. Only ever point these at your own cluster.
   `kubectl config set-context --current --namespace=devapp`.
 - A worker missing from `kubectl get nodes` while its VM is running never joined (its
   kubelet has no `/etc/kubernetes/kubelet.conf`, typically because the control plane was
-  re-initialised after the worker was provisioned). `vagrant provision <name> --provision-with worker`
-  joins it live; no reboot.
+  re-initialised after the worker was provisioned, or the control plane was rebooting while the
+  worker tried to join). `make status` warns when the node count is short.
+  `vagrant provision <name> --provision-with worker` joins it live; no reboot. `scripts/worker.sh`
+  waits for the API server and retries the join three times, so this should be rare now.
 - To add a worker, append to `NODES` in the Vagrantfile and run `vagrant up <name>`.
 - `K8S_VERSION` (Vagrantfile) picks the pkgs.k8s.io minor. Changing it needs fresh VMs
   (`make clean`, then `make all`): the packages are held on existing nodes, and a live
