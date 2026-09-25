@@ -64,7 +64,7 @@ gateway-uninstall: ## Remove the gateway stack
 policy-test:   ## Unit-test the Rego in policy/ with gator (no cluster needed; docker fallback)
 	./scripts/policy-test.sh
 
-check:         ## Lint: shellcheck, yamllint, kubeconform on the manifests, doc links
+check:         ## Lint: shellcheck, yamllint, actionlint on the workflow, kubeconform on the manifests, doc links
 	./scripts/check.sh
 
 status:

@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
 # Static checks for the repo (make check). No cluster and no VMs needed.
 #   - every shell script through ShellCheck
-#   - manifests, policy and fixtures through yamllint (.yamllint in the repo root sets the rules)
+#   - manifests, policy, fixtures and the CI workflow through yamllint (.yamllint in the repo root sets the rules)
+#   - .github/workflows/ through actionlint (workflow syntax, expressions, action inputs, run: scripts)
 #   - k8s/ and friends through kubeconform against the Kubernetes API schema (unknown CRD kinds skipped)
 #   - every relative link in the Markdown files points at a file that exists
 # Missing ShellCheck or yamllint is reported as SKIP (install both with Homebrew);
-# kubeconform falls back to its Docker image.
+# actionlint and kubeconform fall back to their Docker images.
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT" || exit 1
 KUBECONFORM_VERSION="${KUBECONFORM_VERSION:-v0.8.0}"
+ACTIONLINT_VERSION="${ACTIONLINT_VERSION:-1.7.12}"
 rc=0
 step() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
 fail() { echo "FAIL: $*" >&2; rc=1; }
@@ -25,9 +27,25 @@ fi
 
 step "yamllint"
 if command -v yamllint >/dev/null 2>&1; then
-  yamllint -s k8s policy security/policies gateway || fail "yamllint"
+  yamllint -s k8s policy security/policies gateway .github || fail "yamllint"
 else
   skip "yamllint not installed (brew install yamllint)"
+fi
+
+step "actionlint"
+# files are listed explicitly: actionlint's own discovery needs a .git directory, which the temp copy lacks
+al_files=(.github/workflows/*.yml)
+if command -v actionlint >/dev/null 2>&1; then
+  actionlint -no-color "${al_files[@]}" || fail "actionlint"
+elif command -v docker >/dev/null 2>&1; then
+  # same temp-copy dance as kubeconform below; the image bundles shellcheck for run: steps
+  WORK="$(mktemp -d)"
+  cp -R .github "$WORK"/
+  chmod -R a+rX "$WORK"
+  docker run --rm -v "$WORK":/repo -w /repo "rhysd/actionlint:${ACTIONLINT_VERSION}" -no-color "${al_files[@]}" || fail "actionlint"
+  rm -rf "$WORK"
+else
+  skip "neither actionlint nor docker found (brew install actionlint)"
 fi
 
 step "kubeconform"

@@ -23,8 +23,8 @@ Host ──vagrant──▶ cp1  192.168.56.10  (control plane, Flannel CNI, Ubu
 - Docker (to build the API and site images)
 - kubectl within one minor version of `K8S_VERSION` (Vagrantfile; kubectl's skew policy), make, curl
 - ~9 GB free RAM (~7 GB without the desktop), ~30 GB disk
-- Optional: `helm` for `make gateway`; `shellcheck` and `yamllint` for `make check` (kubeconform
-  and gator run from their Docker images when not installed)
+- Optional: `helm` for `make gateway`; `shellcheck` and `yamllint` for `make check` (actionlint,
+  kubeconform and gator run from their Docker images when not installed)
 
 ## Quick start
 ```bash
@@ -43,8 +43,8 @@ make gateway   # optional: MetalLB + Envoy Gateway + Istio ingress via the Gatew
 after `ROLLOUT_TIMEOUT` (180 s), so a missing StorageClass or image fails the step instead
 of hanging.
 
-Without VMs at all: `make check` lints the scripts and manifests (ShellCheck, yamllint,
-kubeconform, doc links) and `make policy-test` unit-tests the Gatekeeper policy with `gator`
+Without VMs at all: `make check` lints the scripts, manifests and CI workflow (ShellCheck, yamllint,
+actionlint, kubeconform, doc links) and `make policy-test` unit-tests the Gatekeeper policy with `gator`
 (Docker fallback for both when the tools are not installed).
 
 New to Kubernetes? [docs/course.md](docs/course.md) is a 30-lesson hands-on course built on
@@ -120,6 +120,7 @@ Versions and knobs read by the Makefile (`make target VAR=value`):
 | `ENVOY_GATEWAY_VERSION` | `v1.9.1` | `make gateway` (also the source of the Gateway API CRDs) |
 | `ISTIO_VERSION` | `1.30.5` | `make gateway` (charts lag GitHub releases by a few days) |
 | `KUBECONFORM_VERSION` | `v0.8.0` | `make check` (Docker fallback) |
+| `ACTIONLINT_VERSION` | `1.7.12` | `make check` (Docker fallback) |
 
 `K8S_VERSION` (`1.36`) and `FLANNEL_VERSION` (`v0.28.9`) live in the Vagrantfile; changing
 `K8S_VERSION` needs fresh VMs (`make clean && make all`).
@@ -164,7 +165,7 @@ tears everything down.
 
 ## Static checks (no VMs)
 ```bash
-make check          # shellcheck, yamllint, kubeconform on k8s/ policy/ gateway/, Markdown links
+make check          # shellcheck, yamllint, actionlint on .github/, kubeconform on k8s/ policy/ gateway/, Markdown links
 make policy-test    # gator verify: policy/tests/suite.yaml, 17 cases against the templates
 ```
 Both run in CI on every push ([.github/workflows/check.yml](.github/workflows/check.yml)).
@@ -225,7 +226,7 @@ scripts/load-image.sh      build api + web images on host → import into worker
 scripts/gatekeeper.sh      install OPA Gatekeeper (pinned) and apply policy/ (make policy; `uninstall` removes it)
 scripts/gateway.sh         MetalLB + Envoy Gateway + Istio (Helm, pinned) and gateway/ (make gateway; `uninstall` removes it)
 scripts/policy-test.sh     gator verify on policy/tests/suite.yaml, no cluster needed (make policy-test)
-scripts/check.sh           ShellCheck, yamllint, kubeconform, Markdown link check (make check)
+scripts/check.sh           ShellCheck, yamllint, actionlint, kubeconform, Markdown link check (make check)
 app/                       FastAPI service + Dockerfile
 web/                       static site + nginx proxy config + Dockerfile
 k8s/                       Namespace, Postgres StatefulSet, API Deployment + NodePort, web Deployment + NodePort

@@ -1,11 +1,16 @@
 # Static checks only: nothing here needs VirtualBox or a cluster.
-#   make check        shellcheck, yamllint, kubeconform, Markdown links (scripts/check.sh)
+#   make check        shellcheck, yamllint, actionlint, kubeconform, Markdown links (scripts/check.sh)
 #   make policy-test  gator verify on policy/tests/suite.yaml (scripts/policy-test.sh)
-# kubeconform and gator come from their Docker images (the scripts' fallback).
+# actionlint, kubeconform and gator come from their Docker images (the scripts' fallback).
 name: check
 on:
   push:
   pull_request:
+permissions:
+  contents: read   # the job only reads the checkout; nothing writes back to GitHub
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true   # a newer push to the same branch supersedes the running check
 jobs:
   check:
     runs-on: ubuntu-24.04   # pinned: ubuntu-latest becomes 26.04 on 2026-10-19
