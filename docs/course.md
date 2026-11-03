@@ -701,163 +701,7 @@ A standalone Pod has no controller responsible for replacing it.
 
 ---
 
-# Lesson 7 — Deployments, ReplicaSets, and StatefulSets
-
-## Objective
-
-Understand Kubernetes workload controllers.
-
-### Pod
-
-One workload instance.
-
-### ReplicaSet
-
-Keeps a requested number of pods alive.
-
-### Deployment
-
-Manages ReplicaSets and supports rolling updates.
-
-### StatefulSet
-
-Provides stable identity and ordered behavior for stateful applications.
-
-## Application Architecture
-
-```text
-Client
-   ↓
-NodePort 30080
-   ↓
-API Service
-   ↓
-API Deployment (2 replicas)
- ┌─────┴─────┐
-Pod         Pod
-   ↓
-Postgres Service (ClusterIP)
-   ↓
-postgres-0 (StatefulSet)
-   ↓
-Persistent Volume
-```
-
-**Lab note.** This lesson assumes the app is deployed. If you are following in order it
-is not yet; Lesson 9 deploys it. Do Lesson 9 first, then return here.
-
-## Lab
-
-```bash
-kubectl -n devapp get deployments
-```
-
-```bash
-kubectl -n devapp get replicasets
-```
-
-```bash
-kubectl -n devapp get statefulsets
-```
-
-```bash
-kubectl -n devapp get pods -o wide
-```
-
-Delete the API pods (both replicas carry the `app=api` label):
-
-```bash
-kubectl -n devapp delete pod -l app=api
-kubectl -n devapp get pods -w
-```
-
-Observe Kubernetes create replacements with new names.
-
-## Compare
-
-Standalone Pod:
-
-```text
-Delete Pod
-↓
-Gone
-```
-
-Deployment-managed Pod:
-
-```text
-Delete Pod
-↓
-ReplicaSet notices
-↓
-Replacement Pod created
-```
-
----
-
-# Lesson 8 — Kubernetes Services and Application Networking
-
-## Objective
-
-Understand how Kubernetes gives workloads stable network access.
-
-Important Service types in the lab include:
-
-```text
-ClusterIP
-NodePort
-```
-
-PostgreSQL uses a ClusterIP Service (`postgres.devapp.svc.cluster.local`).
-
-The API uses NodePort 30080; the static site uses NodePort 30081.
-
-Example flow:
-
-```text
-192.168.56.11:30080
-          ↓
-     NodePort
-          ↓
-     API Service
-          ↓
-     API Pod
-```
-
-A request can enter through one worker even when the destination Pod runs on another worker.
-
-## Lab
-
-```bash
-kubectl -n devapp get services
-```
-
-Inspect endpoints:
-
-```bash
-kubectl -n devapp get endpoints
-```
-
-Test repeatedly:
-
-```bash
-for i in 1 2 3 4
-do
-    curl -s 192.168.56.11:30080/healthz
-    echo
-done
-```
-
-Observe the Pod hostname changing between replicas. `make test` runs the same checks
-plus the site and the `web` edge (`http://192.168.56.20/api/healthz`).
-
-## Knowledge Check
-
-Why can you connect to `w1:30080` even when the API Pod handling the request is running on `w2`?
-
----
-
-# Lesson 9 — Persistent Storage and PostgreSQL
+# Lesson 7 — Persistent Storage and PostgreSQL
 
 ## Objective
 
@@ -920,32 +764,9 @@ Pending
 Bound
 ```
 
-The API pods are still not running: their image is not on the workers yet. That is
-Lesson 10. Run it now (`make image`, then `make deploy` again) before the persistence test.
-
-## Persistence Test
-
-Create application data:
-
-```bash
-curl -s -X POST http://192.168.56.11:30080/notes \
-  -H 'Content-Type: application/json' -d '{"text":"survives restarts"}'
-```
-
-Then:
-
-```bash
-kubectl -n devapp delete pod postgres-0
-kubectl -n devapp get pods -w          # postgres-0 comes back with the same name
-```
-
-Retrieve the data:
-
-```bash
-curl -s http://192.168.56.11:30080/notes
-```
-
-It should still exist.
+The API pods are still not running: their image is not on the workers yet. In the
+next lesson you will build and distribute the images, complete deployment, and
+verify that PostgreSQL data survives Pod replacement.
 
 ## Key Lesson
 
@@ -964,7 +785,7 @@ That is useful for learning but is not equivalent to resilient production storag
 
 ---
 
-# Lesson 10 — Container Images and the Development Loop
+# Lesson 8 — Container Images and the Development Loop
 
 ## Objective
 
@@ -997,6 +818,50 @@ Build and distribute:
 ```bash
 make image                 # both images; make image IMAGES=api for one
 ```
+
+## Complete Application Deployment
+
+With storage installed and both images available on the workers, deploy again:
+
+```bash
+make deploy
+```
+
+This time the PostgreSQL, API, and web rollouts should complete. Verify:
+
+```bash
+kubectl -n devapp get pods -o wide
+kubectl -n devapp get pvc
+curl -s http://192.168.56.11:30080/readyz
+```
+
+The Pods should be Ready, the PVC Bound, and the readiness request successful.
+
+## Persistence Test
+
+Create application data:
+
+```bash
+curl -s -X POST http://192.168.56.11:30080/notes \
+  -H 'Content-Type: application/json' -d '{"text":"survives restarts"}'
+```
+
+Then:
+
+```bash
+kubectl -n devapp delete pod postgres-0
+kubectl -n devapp get pods -w          # postgres-0 comes back with the same name
+```
+
+Retrieve the data:
+
+```bash
+curl -s http://192.168.56.11:30080/notes
+```
+
+It should still exist.
+
+## Restart After Rebuilding
 
 Restart the API:
 
@@ -1044,6 +909,162 @@ app/main.py
 
 does not modify containers that are already running. And because the image tag never
 changes (`:dev`), even a reloaded image is ignored until the pods are restarted.
+
+---
+
+# Lesson 9 — Deployments, ReplicaSets, and StatefulSets
+
+## Objective
+
+Understand Kubernetes workload controllers.
+
+### Pod
+
+One workload instance.
+
+### ReplicaSet
+
+Keeps a requested number of pods alive.
+
+### Deployment
+
+Manages ReplicaSets and supports rolling updates.
+
+### StatefulSet
+
+Provides stable identity and ordered behavior for stateful applications.
+
+## Application Architecture
+
+```text
+Client
+   ↓
+NodePort 30080
+   ↓
+API Service
+   ↓
+API Deployment (2 replicas)
+ ┌─────┴─────┐
+Pod         Pod
+   ↓
+Postgres Service (ClusterIP)
+   ↓
+postgres-0 (StatefulSet)
+   ↓
+Persistent Volume
+```
+
+**Lab note.** The storage and image lessons have prepared and deployed the app.
+Use the running workloads below to inspect how their controllers behave.
+
+## Lab
+
+```bash
+kubectl -n devapp get deployments
+```
+
+```bash
+kubectl -n devapp get replicasets
+```
+
+```bash
+kubectl -n devapp get statefulsets
+```
+
+```bash
+kubectl -n devapp get pods -o wide
+```
+
+Delete the API pods (both replicas carry the `app=api` label):
+
+```bash
+kubectl -n devapp delete pod -l app=api
+kubectl -n devapp get pods -w
+```
+
+Observe Kubernetes create replacements with new names.
+
+## Compare
+
+Standalone Pod:
+
+```text
+Delete Pod
+↓
+Gone
+```
+
+Deployment-managed Pod:
+
+```text
+Delete Pod
+↓
+ReplicaSet notices
+↓
+Replacement Pod created
+```
+
+---
+
+# Lesson 10 — Kubernetes Services and Application Networking
+
+## Objective
+
+Understand how Kubernetes gives workloads stable network access.
+
+Important Service types in the lab include:
+
+```text
+ClusterIP
+NodePort
+```
+
+PostgreSQL uses a ClusterIP Service (`postgres.devapp.svc.cluster.local`).
+
+The API uses NodePort 30080; the static site uses NodePort 30081.
+
+Example flow:
+
+```text
+192.168.56.11:30080
+          ↓
+     NodePort
+          ↓
+     API Service
+          ↓
+     API Pod
+```
+
+A request can enter through one worker even when the destination Pod runs on another worker.
+
+## Lab
+
+```bash
+kubectl -n devapp get services
+```
+
+Inspect endpoints:
+
+```bash
+kubectl -n devapp get endpoints
+```
+
+Test repeatedly:
+
+```bash
+for i in 1 2 3 4
+do
+    curl -s 192.168.56.11:30080/healthz
+    echo
+done
+```
+
+Observe the Pod hostname changing between replicas. `make test` runs the same checks
+plus the site and the `web` edge (`http://192.168.56.20/api/healthz`).
+
+## Knowledge Check
+
+Why can you connect to `w1:30080` even when the API Pod handling the request is running on `w2`?
 
 ---
 

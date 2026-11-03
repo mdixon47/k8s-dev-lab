@@ -22,7 +22,7 @@ lab), **future** (deliberately not done), **resolved**.
 | 1.6 | open | **README: "The screen is fixed at 1280x800."** Nothing in the repo sets a resolution; it is presumably VirtualBox's EFI default for the ramfb device on ARM64. Confirm with `xrandr` (or `cat /sys/class/drm/card0-*/modes`) on cp1, and say whether amd64 hosts differ. |
 | 1.7 | open | **learn.md exercise 12 and CLAUDE.md troubleshooting: `xrandr --output None-1`.** The output name comes from XWayland under GNOME 50 (Wayland session). `None-1` was observed on an earlier XFCE/Xorg build; on XWayland it may be `XWAYLAND0` or similar, and `xrandr --off` through XWayland may not blank the display at all. `scripts/desktop.sh` avoids the name by looping over `xrandr | awk '/ connected/'`. Verify the exercise still does what it says, or rewrite it around `vbox-display-fix`. |
 | 1.8 | resolved 2026-09-20 | **The `/swap.img` fstab line.** Confirmed on w1: `#/swap.img<tab>none<tab>swap<tab>sw<tab>0<tab>0`. The exercise text is right. |
-| 1.9 | open | **Course commands after the 2026-09-20 changes.** `docs/course.md` claims every command was verified. Lesson 9's `make deploy` now fails on the timeout instead of hanging (text updated), and lesson 12 gained a `make snapshot` note. Neither has been run through. |
+| 1.9 | open | **Course commands after the 2026-09-20 changes.** `docs/course.md` claims every command was verified. Lesson 7's `make deploy` now fails on the timeout instead of hanging (text updated), and lesson 12 gained a `make snapshot` note. Neither has been run through. |
 
 ## 1b. Gateway training (2026-09-21)
 
